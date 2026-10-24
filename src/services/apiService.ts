@@ -159,12 +159,53 @@ class ApiService {
         const id = String(e.id_event || '').trim();
         if (id && !seenEventIds.has(id)) {
           seenEventIds.add(id);
+
+          // Resolusi fleksibel status_aktif dari database
+          let isActive = true;
+          if (typeof e.status_aktif === 'boolean') {
+            isActive = e.status_aktif;
+          } else if (typeof e.tahun === 'boolean') {
+            // Jika kolom tergeser, boolean tersimpan di kolom 'tahun'
+            isActive = e.tahun;
+          } else if (String(e.status_aktif).trim().toLowerCase() === 'false' || String(e.status_aktif).trim() === '0') {
+            isActive = false;
+          } else if (String(e.tahun).trim().toLowerCase() === 'false' || String(e.tahun).trim() === '0') {
+            isActive = false;
+          } else if (String(e.status_aktif).trim().toLowerCase() === 'true' || String(e.status_aktif).trim() === '1') {
+            isActive = true;
+          } else if (String(e.tahun).trim().toLowerCase() === 'true' || String(e.tahun).trim() === '1') {
+            isActive = true;
+          } else {
+            // Default sub-event adalah AKTIF (Buka) jika tidak diset false secara eksplisit
+            isActive = true;
+          }
+
+          // Resolusi nama_event & kode_event jika terjadi pergeseran kolom spreadsheet
+          let namaEvent = String(e.nama_event || '').trim();
+          let kodeEvent = String(e.kode_event || '').trim();
+          let tahunStr = '2026';
+
+          if (typeof e.status_aktif === 'string' && e.status_aktif.length > 5 && e.status_aktif.toLowerCase() !== 'true' && e.status_aktif.toLowerCase() !== 'false') {
+            // Kolom status_aktif di spreadsheet terisi nama panjang event
+            namaEvent = e.status_aktif;
+            kodeEvent = String(e.nama_event || 'Duta Camp').trim();
+            tahunStr = (typeof e.kode_event === 'number' || (typeof e.kode_event === 'string' && /^\d+$/.test(e.kode_event)))
+              ? String(e.kode_event)
+              : '2026';
+          } else {
+            if (typeof e.tahun === 'string' && /^\d+$/.test(e.tahun)) {
+              tahunStr = e.tahun;
+            } else if (typeof e.tahun === 'number') {
+              tahunStr = String(e.tahun);
+            }
+          }
+
           events.push({
             id_event: id,
-            kode_event: String(e.kode_event || e.nama_event || ''),
-            nama_event: String(e.nama_event || ''),
-            tahun: String(e.tahun || '2026'),
-            status_aktif: e.status_aktif === true || String(e.status_aktif).toLowerCase() === 'true',
+            kode_event: kodeEvent || namaEvent || 'Duta Camp',
+            nama_event: namaEvent || kodeEvent || 'Duta Camp',
+            tahun: tahunStr,
+            status_aktif: isActive,
             batas_waktu: e.batas_waktu ? String(e.batas_waktu) : undefined,
             deskripsi: e.deskripsi ? String(e.deskripsi) : '',
             tipe_peserta: e.tipe_peserta || 'Group',
@@ -224,13 +265,24 @@ class ApiService {
               anggotaArr = t.anggota.split(',').map((s: string) => s.trim()).filter(Boolean);
             }
           }
+
+          // Deteksi kategori regu & foto_url jika tergeser di spreadsheet
+          let katRegu: 'Putra' | 'Putri' = 'Putra';
+          let fotoUrl = String(t.foto_url || '').trim();
+          if (fotoUrl === 'Putra' || fotoUrl === 'Putri') {
+            katRegu = fotoUrl;
+            fotoUrl = (t.kategori_regu && t.kategori_regu !== 'Putra' && t.kategori_regu !== 'Putri') ? String(t.kategori_regu) : '';
+          } else if (t.kategori_regu === 'Putri') {
+            katRegu = 'Putri';
+          }
+
           teams.push({
             id_team: id,
             id_event: String(t.id_event || ''),
             nama_regu: String(t.nama_regu || ''),
             kelas_pangkalan: String(t.kelas_pangkalan || ''),
-            kategori_regu: t.kategori_regu || 'Putra',
-            foto_url: t.foto_url || '',
+            kategori_regu: katRegu,
+            foto_url: fotoUrl,
             anggota: anggotaArr,
             motto: t.motto || '',
             ketua_regu: t.ketua_regu || '',
@@ -263,10 +315,28 @@ class ApiService {
       const seenScoreKeys = new Set<string>();
       const juryScores: JuryScore[] = [];
       for (const s of rawData.jury_scores || []) {
-        const key = `${s.id_jury}_${s.id_team}_${s.id_kategori}`;
-        if (!seenScoreKeys.has(key)) {
-          seenScoreKeys.add(key);
-          let kScores: Record<string, number> = {};
+        let idTeam = String(s.id_team || '');
+        let idKategori = String(s.id_kategori || '');
+        let juryName = String(s.jury_name || '');
+        let skorNum = Number(s.skor_1_to_5) || 0;
+        let catatanStr = String(s.catatan || '');
+        let kScores: Record<string, number> = {};
+        let isFinal = true;
+        let timestampStr = String(s.timestamp || new Date().toISOString());
+
+        // Jika terjadi pergeseran kolom pada sheet Jury_Scores
+        if (typeof s.skor_1_to_5 === 'string' && (s.skor_1_to_5.startsWith('cat-') || s.skor_1_to_5.startsWith('cat_'))) {
+          idTeam = String(s.id_kategori || '');
+          idKategori = String(s.skor_1_to_5 || '');
+          juryName = String(s.id_team || '');
+          skorNum = Number(s.catatan) || 0;
+          catatanStr = String(s.timestamp || '');
+          timestampStr = String(s.is_final || new Date().toISOString());
+          isFinal = s.kriteria_scores === true || String(s.kriteria_scores).toLowerCase() === 'true';
+          if (typeof s.jury_name === 'string' && s.jury_name.trim().startsWith('{')) {
+            try { kScores = JSON.parse(s.jury_name); } catch {}
+          }
+        } else {
           if (typeof s.kriteria_scores === 'object' && s.kriteria_scores !== null) {
             kScores = s.kriteria_scores;
           } else if (typeof s.kriteria_scores === 'string' && s.kriteria_scores.trim().length > 0) {
@@ -276,17 +346,23 @@ class ApiService {
               kScores = {};
             }
           }
+          isFinal = s.is_final === true || String(s.is_final).toLowerCase() === 'true';
+        }
+
+        const key = `${s.id_jury}_${idTeam}_${idKategori}`;
+        if (!seenScoreKeys.has(key)) {
+          seenScoreKeys.add(key);
           juryScores.push({
             id_score: String(s.id_score || `score-${Date.now()}`),
             id_jury: String(s.id_jury || ''),
-            jury_name: String(s.jury_name || ''),
-            id_team: String(s.id_team || ''),
-            id_kategori: String(s.id_kategori || ''),
-            skor_1_to_5: Number(s.skor_1_to_5) || 0,
-            catatan: s.catatan || '',
+            jury_name: juryName,
+            id_team: idTeam,
+            id_kategori: idKategori,
+            skor_1_to_5: skorNum,
+            catatan: catatanStr,
             kriteria_scores: kScores,
-            is_final: s.is_final === true || String(s.is_final).toLowerCase() === 'true',
-            timestamp: s.timestamp || new Date().toISOString()
+            is_final: isFinal,
+            timestamp: timestampStr
           });
         }
       }
@@ -461,10 +537,23 @@ class ApiService {
     }
 
     if (this.gasUrl) {
+      const targetEvent = updated.find(e => e.id_event === id_event);
       fetch(this.gasUrl, {
         method: 'POST',
         body: JSON.stringify({ action: 'toggleEventStatus', id_event, is_active: isActive })
       }).catch(console.warn);
+
+      if (targetEvent) {
+        fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageEvent',
+            operation: 'update',
+            ...targetEvent,
+            status_aktif: isActive
+          })
+        }).catch(console.warn);
+      }
     }
 
     return {
@@ -489,6 +578,25 @@ class ApiService {
     if (currentActive.id_event === id_event) {
       const newActive = { ...currentActive, batas_waktu: deadline };
       localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(newActive));
+    }
+
+    if (this.gasUrl) {
+      const targetEvent = updatedEvents.find(e => e.id_event === id_event);
+      fetch(this.gasUrl, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'updateEventDeadline', id_event, deadline })
+      }).catch(console.warn);
+
+      if (targetEvent) {
+        fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageEvent',
+            operation: 'update',
+            ...targetEvent
+          })
+        }).catch(console.warn);
+      }
     }
 
     return {

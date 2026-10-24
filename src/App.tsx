@@ -99,9 +99,9 @@ export default function App() {
   }, [appState.categories, selectedEventId, selectedCategoryId]);
 
   // Tab protection based on roles:
-  // Dewan Juri is hidden for voter, Voting Publik is hidden for juri
+  // Dewan Juri is hidden for public & voter, Voting Publik is hidden for juri
   useEffect(() => {
-    if (currentUser?.role === 'voter' && activeTab === 'jury') {
+    if ((!currentUser || currentUser.role === 'voter') && activeTab === 'jury') {
       setActiveTab('voter');
     } else if (currentUser?.role === 'juri' && activeTab === 'voter') {
       setActiveTab('jury');

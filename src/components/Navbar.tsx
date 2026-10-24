@@ -125,16 +125,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {/* Menu Dewan Juri: Di-hide jika akun adalah Voting Publik */}
-              {currentUser?.role !== 'voter' && (
+              {/* Menu Dewan Juri: Hanya bisa dilihat saat dibuka dengan akun Juri atau Admin */}
+              {(currentUser?.role === 'juri' || currentUser?.role === 'admin') && (
                 <button
-                  onClick={() => {
-                    if (!currentUser) {
-                      onOpenAuth();
-                    } else {
-                      onSelectTab('jury');
-                    }
-                  }}
+                  onClick={() => onSelectTab('jury')}
                   className={`transition-colors whitespace-nowrap shrink-0 hover:text-emerald-800 flex items-center gap-1.5 ${
                     activeTab === 'jury' ? 'text-emerald-800 font-semibold' : ''
                   }`}
@@ -286,13 +280,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
 
-        {/* Tab 2: Dewan Juri - HIDE jika akun adalah Voting Publik */}
-        {currentUser?.role !== 'voter' && (
+        {/* Tab 2: Dewan Juri - Hanya bisa dilihat saat dibuka dengan akun Juri atau Admin */}
+        {(currentUser?.role === 'juri' || currentUser?.role === 'admin') && (
           <button
-            onClick={() => {
-              if (!currentUser) onOpenAuth();
-              else onSelectTab('jury');
-            }}
+            onClick={() => onSelectTab('jury')}
             className={`flex-1 py-1 px-1 rounded-xl flex flex-col items-center justify-center transition-all ${
               activeTab === 'jury'
                 ? 'text-emerald-800 font-bold bg-emerald-50'

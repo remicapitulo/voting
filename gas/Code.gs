@@ -770,11 +770,31 @@ function handleToggleEventStatus(data) {
   var sheet = ss.getSheetByName(SHEETS.EVENTS);
   if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };
   var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };
+  var headers = rows[0];
+  var statusColIdx = -1;
+  var tahunColIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c]).trim().toLowerCase();
+    if (h === 'status_aktif') statusColIdx = c + 1;
+    if (h === 'tahun') tahunColIdx = c + 1;
+  }
+  var updated = false;
   for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(data.id_event)) {
-      sheet.getRange(i + 1, 5).setValue(data.is_active ? true : false);
-      return { status: 'success', message: 'Status event berhasil diubah' };
+    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {
+      var isAct = (data.is_active === true || String(data.is_active).toLowerCase() === 'true');
+      if (statusColIdx > 0) sheet.getRange(i + 1, statusColIdx).setValue(isAct);
+      if (tahunColIdx > 0 && typeof rows[i][tahunColIdx - 1] === 'boolean') {
+        sheet.getRange(i + 1, tahunColIdx).setValue(isAct);
+      }
+      // Set column 3 and column 5 to guarantee both standard & shifted layouts stay in sync
+      sheet.getRange(i + 1, 3).setValue(isAct);
+      sheet.getRange(i + 1, 5).setValue(isAct);
+      updated = true;
     }
+  }
+  if (updated) {
+    return { status: 'success', message: 'Status event berhasil diubah' };
   }
   return { status: 'error', message: 'Event tidak ditemukan' };
 }
@@ -784,11 +804,26 @@ function handleUpdateEventDeadline(data) {
   var sheet = ss.getSheetByName(SHEETS.EVENTS);
   if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };
   var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };
+  var headers = rows[0];
+  var deadlineColIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c]).trim().toLowerCase();
+    if (h === 'batas_waktu') deadlineColIdx = c + 1;
+  }
+  var updated = false;
   for (var i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(data.id_event)) {
-      sheet.getRange(i + 1, 6).setValue(data.deadline || '');
-      return { status: 'success', message: 'Batas waktu berhasil disimpan' };
+    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {
+      if (deadlineColIdx > 0) {
+        sheet.getRange(i + 1, deadlineColIdx).setValue(data.deadline || '');
+      } else {
+        sheet.getRange(i + 1, 6).setValue(data.deadline || '');
+      }
+      updated = true;
     }
+  }
+  if (updated) {
+    return { status: 'success', message: 'Batas waktu berhasil disimpan' };
   }
   return { status: 'error', message: 'Event tidak ditemukan' };
 }
