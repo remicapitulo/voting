@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { User, ScoreRecapItem } from './types';
+import { User, ScoreRecapItem, ReportConfig } from './types';
 import { apiService, AppStateData } from './services/apiService';
 import { Navbar } from './components/Navbar';
 import { VoterView } from './components/VoterView';
@@ -52,6 +52,14 @@ export default function App() {
     recapData: [],
     weights: { jury: 70, public: 30 }
   });
+
+  // Official Report PDF Configuration State (Kepala Sekolah, Ketua Panitia, Logo Kegiatan Kiri & Logo Sekolah Kanan)
+  const [reportConfig, setReportConfig] = useState<ReportConfig>(() => apiService.getReportConfig());
+
+  const handleUpdateReportConfig = (newCfg: ReportConfig) => {
+    apiService.saveReportConfig(newCfg);
+    setReportConfig(newCfg);
+  };
 
   const refreshData = async (syncFromCloud: boolean = false) => {
     if (syncFromCloud && apiService.getGasUrl()) {
@@ -200,6 +208,8 @@ export default function App() {
               onSelectEvent={(eventId) => {
                 handleSelectEvent(eventId);
               }}
+              reportConfig={reportConfig}
+              onUpdateReportConfig={handleUpdateReportConfig}
             />
           )}
         </main>
@@ -303,6 +313,8 @@ export default function App() {
           category={activeCategoryForPrint}
           recapData={printModalState.recapData}
           weights={printModalState.weights}
+          reportConfig={reportConfig}
+          onUpdateReportConfig={handleUpdateReportConfig}
         />
       )}
     </div>

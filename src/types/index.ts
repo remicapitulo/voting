@@ -38,6 +38,7 @@ export interface CategoryModel {
   votes_required?: number; // Jumlah vote publik per akun (tidak boleh kurang tidak boleh lebih)
   tipe_peserta?: 'Group' | 'Individu'; // Khusus kategori ini per group atau perorangan
   assessment_type?: AssessmentType; // 'all' (Multi: Vote & Juri) | 'public_only' (Vote Bebas Saja) | 'jury_only' (Juri Saja)
+  assigned_juries?: string[]; // Daftar ID atau username dewan juri yang ditugaskan khusus untuk cabang lomba ini (kosong = semua juri)
 }
 
 export interface TeamModel {
@@ -88,3 +89,20 @@ export interface ScoreRecapItem {
   rank: number;
   isFavorit: boolean;
 }
+
+export interface ReportOfficialInfo {
+  nama: string;
+  jabatan: string;
+  nip: string;
+}
+
+export interface ReportConfig {
+  kepalaSekolah: ReportOfficialInfo;
+  ketuaPanitia: ReportOfficialInfo;
+  titimangsaKota: string;
+  logoSekolah: string; // Data URL or SVG
+  logoSekolahType: string; // 'pondok_duta' | 'tut_wuri' | 'custom'
+  logoKegiatan: string; // Data URL or SVG
+  logoKegiatanType: string; // 'pramuka' | 'osis' | 'camp' | 'custom'
+}
+

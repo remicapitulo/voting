@@ -30,7 +30,7 @@ var SCHEMAS = [
   },
   {
     name: SHEETS.CATEGORIES,
-    headers: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi']
+    headers: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi', 'assigned_juries']
   },
   {
     name: SHEETS.TEAMS,
@@ -440,6 +440,7 @@ function doPost(e) {
 
 function getAllDatabaseData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  fixUserRowsAlignment();
   return {
     users: getSheetDataAsObjects(ss.getSheetByName(SHEETS.USERS)),
     events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),
@@ -448,6 +449,96 @@ function getAllDatabaseData() {
     jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
     public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES))
   };
+}
+
+/**
+ * Menyimpan baris baru dengan mencocokkan nama properti ke nama header kolom secara dinamis
+ */
+function appendRowByHeaders(sheet, dataObj) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var row = [];
+  for (var i = 0; i < headers.length; i++) {
+    var key = String(headers[i]).trim();
+    var val = dataObj[key];
+    if (val === undefined || val === null) {
+      row.push('');
+    } else if (typeof val === 'object') {
+      row.push(JSON.stringify(val));
+    } else {
+      row.push(val);
+    }
+  }
+  sheet.appendRow(row);
+  return row;
+}
+
+/**
+ * Memperbarui nilai sel pada baris tertentu berdasarkan kecocokan nama header
+ */
+function updateRowByHeaders(sheet, rowIndex, dataObj) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i < headers.length; i++) {
+    var key = String(headers[i]).trim();
+    if (dataObj[key] !== undefined) {
+      var val = dataObj[key];
+      if (typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      sheet.getRange(rowIndex, i + 1).setValue(val);
+    }
+  }
+}
+
+function ensureHeaderExists(sheet, headerName) {
+  try {
+    var lastCol = Math.max(sheet.getLastColumn(), 1);
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    for (var i = 0; i < headers.length; i++) {
+      if (String(headers[i]).trim() === headerName) return;
+    }
+    sheet.getRange(1, lastCol + 1).setValue(headerName);
+  } catch (e) {
+    // ignore
+  }
+}
+
+/**
+ * Perbaikan Otomatis Baris yang Tergeser di Sheet Users (misal nomor wa masuk ke created_at)
+ */
+function fixUserRowsAlignment() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.USERS);
+    if (!sheet) return;
+    var rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return;
+    var headers = rows[0];
+    var emailCol = headers.indexOf('emailOrWa');
+    var createdCol = headers.indexOf('created_at');
+    var specialtyCol = headers.indexOf('jurySpecialty');
+
+    for (var r = 1; r < rows.length; r++) {
+      var createdAtVal = String(rows[r][createdCol] || '').trim();
+      // Jika kolom created_at terisi nomor telepon/wa (angka murni tanpa huruf 'T')
+      if (createdAtVal && !createdAtVal.includes('T') && /^[0-9+]+$/.test(createdAtVal)) {
+        var realPhone = createdAtVal;
+        var realTimestamp = (specialtyCol >= 0 && String(rows[r][specialtyCol]).includes('T'))
+          ? String(rows[r][specialtyCol])
+          : new Date().toISOString();
+        if (emailCol >= 0) {
+          sheet.getRange(r + 1, emailCol + 1).setValue(realPhone);
+        }
+        sheet.getRange(r + 1, createdCol + 1).setValue(realTimestamp);
+        if (specialtyCol >= 0) {
+          sheet.getRange(r + 1, specialtyCol + 1).setValue('');
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('Auto fix user alignment skipped: ' + e);
+  }
 }
 
 function handleLogin(username, password) {
@@ -501,7 +592,18 @@ function handleRegister(data) {
   }
   var newId = 'voter-' + new Date().getTime();
   var ts = new Date().toISOString();
-  sheet.appendRow([newId, username, password, nama, 'voter', emailOrWa, '', ts]);
+
+  appendRowByHeaders(sheet, {
+    id: newId,
+    username: username,
+    password: password,
+    nama: nama,
+    role: 'voter',
+    emailOrWa: emailOrWa,
+    jurySpecialty: '',
+    created_at: ts
+  });
+
   return { status: 'success', user: { id: newId, username: username, nama: nama, role: 'voter' } };
 }
 
@@ -523,20 +625,28 @@ function handleSubmitJuryScore(data) {
   var isFinal = data.is_final ? true : false;
   var ts = new Date().toISOString();
 
-  var rows = sheet.getDataRange().getValues();
-  for (var r = 1; r < rows.length; r++) {
-    if (String(rows[r][1]) === idJury && String(rows[r][3]) === idTeam && String(rows[r][4]) === idKategori) {
-      sheet.getRange(r + 1, 6).setValue(skor);
-      sheet.getRange(r + 1, 7).setValue(catatan);
-      sheet.getRange(r + 1, 8).setValue(kriteriaScores);
-      sheet.getRange(r + 1, 9).setValue(isFinal);
-      sheet.getRange(r + 1, 10).setValue(ts);
+  var scoreObj = {
+    id_jury: idJury,
+    jury_name: juryName,
+    id_team: idTeam,
+    id_kategori: idKategori,
+    skor_1_to_5: skor,
+    catatan: catatan,
+    kriteria_scores: kriteriaScores,
+    is_final: isFinal,
+    timestamp: ts
+  };
+
+  var scores = getSheetDataAsObjects(sheet);
+  for (var r = 0; r < scores.length; r++) {
+    if (String(scores[r].id_jury) === idJury && String(scores[r].id_team) === idTeam && String(scores[r].id_kategori) === idKategori) {
+      updateRowByHeaders(sheet, r + 2, scoreObj);
       return { status: 'success', message: 'Nilai juri berhasil diperbarui' };
     }
   }
 
-  var newScoreId = data.id_score || ('score-' + new Date().getTime());
-  sheet.appendRow([newScoreId, idJury, juryName, idTeam, idKategori, skor, catatan, kriteriaScores, isFinal, ts]);
+  scoreObj.id_score = data.id_score || ('score-' + new Date().getTime());
+  appendRowByHeaders(sheet, scoreObj);
   return { status: 'success', message: 'Nilai juri berhasil disimpan' };
 }
 
@@ -554,11 +664,11 @@ function handleSubmitPublicVote(data) {
   var idKategori = String(data.id_kategori || '');
   var ts = new Date().toISOString();
 
-  var rows = sheet.getDataRange().getValues();
+  var votes = getSheetDataAsObjects(sheet);
   var userVotesInCat = 0;
-  for (var r = 1; r < rows.length; r++) {
-    if (String(rows[r][1]) === idVoter && String(rows[r][4]) === idKategori) {
-      if (String(rows[r][3]) === idTeam) {
+  for (var r = 0; r < votes.length; r++) {
+    if (String(votes[r].id_voter) === idVoter && String(votes[r].id_kategori) === idKategori) {
+      if (String(votes[r].id_team) === idTeam) {
         return { status: 'error', message: 'Anda sudah memberikan suara untuk regu ini!' };
       }
       userVotesInCat++;
@@ -570,7 +680,15 @@ function handleSubmitPublicVote(data) {
     return { status: 'error', message: 'Hak suara Anda (' + maxQuota + ' suara) untuk kategori ini sudah terpenuhi.' };
   }
 
-  sheet.appendRow(['vote-' + new Date().getTime(), idVoter, voterName, idTeam, idKategori, ts]);
+  appendRowByHeaders(sheet, {
+    id_vote: 'vote-' + new Date().getTime(),
+    id_voter: idVoter,
+    voter_name: voterName,
+    id_team: idTeam,
+    id_kategori: idKategori,
+    timestamp: ts
+  });
+
   return { status: 'success', message: 'Vote berhasil disimpan!' };
 }
 
@@ -596,38 +714,36 @@ function handleManageCategory(data) {
     return { status: 'error', message: 'Cabang lomba tidak ditemukan' };
   }
 
+  ensureHeaderExists(sheet, 'assigned_juries');
+
   var kriteriaStr = Array.isArray(data.kriteria) ? JSON.stringify(data.kriteria) : String(data.kriteria || '[]');
-  var assessType = data.assessment_type || 'all';
-  var tipePeserta = data.tipe_peserta || 'Group';
-  var votesReq = parseInt(data.votes_required || 1, 10);
-  var desc = data.deskripsi || '';
+  var assignedJuriesStr = Array.isArray(data.assigned_juries)
+    ? JSON.stringify(data.assigned_juries)
+    : String(data.assigned_juries || '[]');
+
+  var catObj = {
+    id_kategori: idKategori,
+    id_event: data.id_event || 'duta-camp-2026',
+    nama_kategori: data.nama_kategori,
+    tipe: data.tipe || 'Lomba',
+    assessment_type: data.assessment_type || 'all',
+    tipe_peserta: data.tipe_peserta || 'Group',
+    votes_required: parseInt(data.votes_required || 1, 10),
+    kriteria: kriteriaStr,
+    deskripsi: data.deskripsi || '',
+    assigned_juries: assignedJuriesStr
+  };
 
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === idKategori) {
-        sheet.getRange(i + 1, 3).setValue(data.nama_kategori);
-        sheet.getRange(i + 1, 4).setValue(data.tipe || 'Lomba');
-        sheet.getRange(i + 1, 5).setValue(assessType);
-        sheet.getRange(i + 1, 6).setValue(tipePeserta);
-        sheet.getRange(i + 1, 7).setValue(votesReq);
-        sheet.getRange(i + 1, 8).setValue(kriteriaStr);
-        sheet.getRange(i + 1, 9).setValue(desc);
+        updateRowByHeaders(sheet, i + 1, catObj);
         return { status: 'success', message: 'Cabang lomba berhasil diperbarui' };
       }
     }
   }
 
-  sheet.appendRow([
-    idKategori,
-    data.id_event || 'duta-camp-2026',
-    data.nama_kategori,
-    data.tipe || 'Lomba',
-    assessType,
-    tipePeserta,
-    votesReq,
-    kriteriaStr,
-    desc
-  ]);
+  appendRowByHeaders(sheet, catObj);
   return { status: 'success', message: 'Cabang lomba berhasil ditambahkan' };
 }
 
@@ -654,29 +770,26 @@ function handleManageTeam(data) {
   }
 
   var anggotaStr = Array.isArray(data.anggota) ? JSON.stringify(data.anggota) : String(data.anggota || '[]');
+  var teamObj = {
+    id_team: idTeam,
+    id_event: data.id_event || 'duta-camp-2026',
+    nama_regu: data.nama_regu,
+    kelas_pangkalan: data.kelas_pangkalan,
+    kategori_regu: data.kategori_regu || 'Putra',
+    foto_url: data.foto_url || '',
+    anggota: anggotaStr
+  };
 
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === idTeam) {
-        sheet.getRange(i + 1, 3).setValue(data.nama_regu);
-        sheet.getRange(i + 1, 4).setValue(data.kelas_pangkalan);
-        sheet.getRange(i + 1, 5).setValue(data.kategori_regu || 'Putra');
-        sheet.getRange(i + 1, 6).setValue(data.foto_url || '');
-        sheet.getRange(i + 1, 7).setValue(anggotaStr);
+        updateRowByHeaders(sheet, i + 1, teamObj);
         return { status: 'success', message: 'Data peserta berhasil diperbarui' };
       }
     }
   }
 
-  sheet.appendRow([
-    idTeam,
-    data.id_event || 'duta-camp-2026',
-    data.nama_regu,
-    data.kelas_pangkalan,
-    data.kategori_regu || 'Putra',
-    data.foto_url || '',
-    anggotaStr
-  ]);
+  appendRowByHeaders(sheet, teamObj);
   return { status: 'success', message: 'Peserta berhasil ditambahkan' };
 }
 
@@ -704,26 +817,30 @@ function handleManageJury(data) {
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === String(data.id)) {
-        sheet.getRange(i + 1, 2).setValue(String(data.username).trim().toLowerCase());
-        if (data.password) sheet.getRange(i + 1, 3).setValue(data.password);
-        sheet.getRange(i + 1, 4).setValue(data.nama);
-        sheet.getRange(i + 1, 7).setValue(data.jurySpecialty || '');
+        var updateObj = {
+          username: String(data.username).trim().toLowerCase(),
+          nama: data.nama,
+          jurySpecialty: data.jurySpecialty || ''
+        };
+        if (data.password) updateObj.password = data.password;
+        updateRowByHeaders(sheet, i + 1, updateObj);
         return { status: 'success', message: 'Data juri berhasil diperbarui' };
       }
     }
   }
 
   var newId = 'jury-' + new Date().getTime();
-  sheet.appendRow([
-    newId,
-    String(data.username).trim().toLowerCase(),
-    data.password,
-    data.nama,
-    'juri',
-    '',
-    data.jurySpecialty || '',
-    new Date().toISOString()
-  ]);
+  appendRowByHeaders(sheet, {
+    id: newId,
+    username: String(data.username).trim().toLowerCase(),
+    password: data.password,
+    nama: data.nama,
+    role: 'juri',
+    emailOrWa: '',
+    jurySpecialty: data.jurySpecialty || '',
+    created_at: new Date().toISOString()
+  });
+
   return { status: 'success', message: 'Akun juri berhasil dibuat' };
 }
 
@@ -739,29 +856,26 @@ function handleManageEvent(data) {
   var op = data.operation || 'create';
   var rows = sheet.getDataRange().getValues();
 
+  var eventObj = {
+    id_event: idEvent,
+    kode_event: data.kode_event || '',
+    nama_event: data.nama_event,
+    tahun: data.tahun || '2026',
+    status_aktif: data.status_aktif !== undefined ? data.status_aktif : true,
+    batas_waktu: data.batas_waktu || '',
+    deskripsi: data.deskripsi || ''
+  };
+
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === idEvent) {
-        sheet.getRange(i + 1, 2).setValue(data.kode_event || '');
-        sheet.getRange(i + 1, 3).setValue(data.nama_event || '');
-        sheet.getRange(i + 1, 4).setValue(data.tahun || '2026');
-        sheet.getRange(i + 1, 5).setValue(data.status_aktif !== undefined ? data.status_aktif : true);
-        sheet.getRange(i + 1, 6).setValue(data.batas_waktu || '');
-        sheet.getRange(i + 1, 7).setValue(data.deskripsi || '');
+        updateRowByHeaders(sheet, i + 1, eventObj);
         return { status: 'success', message: 'Event berhasil diperbarui' };
       }
     }
   }
 
-  sheet.appendRow([
-    idEvent,
-    data.kode_event || '',
-    data.nama_event,
-    data.tahun || '2026',
-    data.status_aktif !== undefined ? data.status_aktif : true,
-    data.batas_waktu || '',
-    data.deskripsi || ''
-  ]);
+  appendRowByHeaders(sheet, eventObj);
   return { status: 'success', message: 'Event berhasil ditambahkan' };
 }
 

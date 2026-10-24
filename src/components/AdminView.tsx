@@ -8,9 +8,18 @@ import {
   PublicVote,
   ScoreRecapItem,
   EventParticipantType,
-  AssessmentType
+  AssessmentType,
+  ReportConfig
 } from '../types';
 import { apiService } from '../services/apiService';
+import { LogoRenderer } from './LogoRenderer';
+import {
+  LOGO_SEKOLAH_PONDOK_DUTA_SVG,
+  LOGO_PRAMUKA_SVG,
+  LOGO_OSIS_SVG,
+  LOGO_CAMP_SVG,
+  LOGO_TUT_WURI_SVG
+} from '../utils/reportLogos';
 import {
   Settings,
   Users,
@@ -18,6 +27,7 @@ import {
   Vote,
   Plus,
   Download,
+  FileDown,
   Printer,
   CheckCircle2,
   Lock,
@@ -37,7 +47,18 @@ import {
   Flame,
   Sparkles,
   Trophy,
-  FolderPlus
+  FolderPlus,
+  Upload,
+  Image as ImageIcon,
+  RotateCcw,
+  Building,
+  ChevronDown,
+  ChevronUp,
+  GraduationCap,
+  FileText,
+  LayoutGrid,
+  Table,
+  Medal
 } from 'lucide-react';
 import { getTeamInitials } from '../utils/initials';
 
@@ -53,6 +74,8 @@ interface AdminViewProps {
   onOpenPrintReport: (categoryId: string, recapData: ScoreRecapItem[], weights: { jury: number; public: number }) => void;
   onRefreshData: () => void;
   onSelectEvent?: (eventId: string) => void;
+  reportConfig?: ReportConfig;
+  onUpdateReportConfig?: (newConfig: ReportConfig) => void;
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({
@@ -66,9 +89,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
   currentUser,
   onOpenPrintReport,
   onRefreshData,
-  onSelectEvent
+  onSelectEvent,
+  reportConfig: initialReportConfig,
+  onUpdateReportConfig
 }) => {
   const [activeTab, setActiveTab] = useState<'subevent' | 'kalkulasi' | 'tabulasi' | 'voting' | 'aturan' | 'manajemen'>('subevent');
+
+  // Report configuration (Kepala Sekolah, Ketua Panitia, Logo Kegiatan Kiri & Logo Sekolah Kanan)
+  const [reportConfig, setReportConfig] = useState<ReportConfig>(() => {
+    return initialReportConfig || apiService.getReportConfig();
+  });
+  const [showReportConfigSection, setShowReportConfigSection] = useState(true);
+
+  // View mode for Klasemen & Rekapitulasi: 'card' (Card View, default for mobile) or 'table' (Tabular View)
+  const [recapViewMode, setRecapViewMode] = useState<'card' | 'table'>('card');
+
+  React.useEffect(() => {
+    if (initialReportConfig) {
+      setReportConfig(initialReportConfig);
+    }
+  }, [initialReportConfig]);
 
   const availableEvents = useMemo(() => {
     if (events && events.length > 0) return events;
@@ -174,6 +214,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [newCatCriteriaText, setNewCatCriteriaText] = useState(
     'Penguasaan materi & penampilan\nKekompakan & kedisiplinan\nKreativitas & originalitas'
   );
+  const [newCatAssignedJuries, setNewCatAssignedJuries] = useState<string[]>([]);
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
   const juryUsers = users.filter(u => u.role === 'juri');
@@ -405,7 +446,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
       assessment_type: newCatAssessmentType,
       votes_required: newCatAssessmentType === 'jury_only' ? 1 : newCatVotesRequired,
       iconName: newCatIconName || 'Flame',
-      kriteria
+      kriteria,
+      assigned_juries: newCatAssessmentType === 'public_only' ? [] : newCatAssignedJuries
     });
 
     if (res.success) {
@@ -413,6 +455,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setShowAddCategoryModal(false);
       setNewCatName('');
       setNewCatDesc('');
+      setNewCatAssignedJuries([]);
       if (res.category) {
         setSelectedCategoryId(res.category.id_kategori);
       }
@@ -565,6 +608,93 @@ export const AdminView: React.FC<AdminViewProps> = ({
     } catch {
       return isoString;
     }
+  };
+
+  // Report Config Handlers (Kepala Sekolah, Ketua Panitia, Logo Kegiatan Kiri & Logo Sekolah Kanan)
+  const handleSaveReportConfig = () => {
+    apiService.saveReportConfig(reportConfig);
+    onUpdateReportConfig?.(reportConfig);
+    setBannerMsg({ type: 'success', text: 'Pengaturan Lembar Rekap PDF (Logo & Penandatangan) berhasil disimpan.' });
+    setTimeout(() => setBannerMsg(null), 3500);
+  };
+
+  const handleResetReportConfig = () => {
+    const defaultConfig: ReportConfig = {
+      kepalaSekolah: {
+        nama: "Drs. H. Ahmad Syafi'i, M.Pd",
+        jabatan: "Kepala SMPIT Pondok Duta / Ka. Mabigus",
+        nip: "NIP. 19720815 199802 1 001"
+      },
+      ketuaPanitia: {
+        nama: "Kak Muhammad Ilham, S.Pd",
+        jabatan: "Ketua Panitia Pelaksana",
+        nip: "NIP. 19850412 201101 1 003"
+      },
+      titimangsaKota: "Depok",
+      logoSekolah: LOGO_SEKOLAH_PONDOK_DUTA_SVG,
+      logoSekolahType: 'pondok_duta',
+      logoKegiatan: LOGO_PRAMUKA_SVG,
+      logoKegiatanType: 'pramuka'
+    };
+    setReportConfig(defaultConfig);
+    apiService.saveReportConfig(defaultConfig);
+    onUpdateReportConfig?.(defaultConfig);
+    setBannerMsg({ type: 'success', text: 'Pengaturan Lembar Rekap dikembalikan ke bawaan resmi SMPIT Pondok Duta.' });
+    setTimeout(() => setBannerMsg(null), 3000);
+  };
+
+  const handleSelectPresetKegiatan = (type: string, svg: string) => {
+    const updated: ReportConfig = { ...reportConfig, logoKegiatan: svg, logoKegiatanType: type };
+    setReportConfig(updated);
+    apiService.saveReportConfig(updated);
+    onUpdateReportConfig?.(updated);
+    setBannerMsg({ type: 'success', text: `Preset Logo Kegiatan (${type.toUpperCase()}) dipilih.` });
+    setTimeout(() => setBannerMsg(null), 2500);
+  };
+
+  const handleSelectPresetSekolah = (type: string, svg: string) => {
+    const updated: ReportConfig = { ...reportConfig, logoSekolah: svg, logoSekolahType: type };
+    setReportConfig(updated);
+    apiService.saveReportConfig(updated);
+    onUpdateReportConfig?.(updated);
+    setBannerMsg({ type: 'success', text: `Preset Logo Sekolah (${type.toUpperCase()}) dipilih.` });
+    setTimeout(() => setBannerMsg(null), 2500);
+  };
+
+  const handleUploadLogoKegiatan = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        const updated: ReportConfig = { ...reportConfig, logoKegiatan: dataUrl, logoKegiatanType: 'custom' };
+        setReportConfig(updated);
+        apiService.saveReportConfig(updated);
+        onUpdateReportConfig?.(updated);
+        setBannerMsg({ type: 'success', text: 'Logo Kegiatan (Kiri Kop) berhasil diunggah.' });
+        setTimeout(() => setBannerMsg(null), 3000);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleUploadLogoSekolah = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) {
+        const updated: ReportConfig = { ...reportConfig, logoSekolah: dataUrl, logoSekolahType: 'custom' };
+        setReportConfig(updated);
+        apiService.saveReportConfig(updated);
+        onUpdateReportConfig?.(updated);
+        setBannerMsg({ type: 'success', text: 'Logo Sekolah (Kanan Kop) berhasil diunggah.' });
+        setTimeout(() => setBannerMsg(null), 3000);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -988,23 +1118,441 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                 <button
                   onClick={() => onOpenPrintReport(selectedCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
-                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
+                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                  title="Unduh dokumen Berita Acara Rekapitulasi Resmi format PDF"
                 >
-                  <Printer className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Cetak Lembar Rekap Resmi</span>
+                  <FileDown className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Unduh Lembar Rekap PDF</span>
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Full Tabular Ranking Table */}
+          {/* ========================================================================= */}
+          {/* MENU PENGISIAN NAMA KEPALA SEKOLAH, KETUA PANITIA & LOGO KOP PDF */}
+          {/* ========================================================================= */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold shrink-0 shadow-md">
+                  <FileText className="w-5 h-5 text-slate-950" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-base font-extrabold text-white">
+                      Pengaturan Kop &amp; Pejabat Penandatangan Unduhan PDF
+                    </h3>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400 text-slate-950">
+                      Resmi
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    Atur logo kegiatan (Kiri Kop), logo sekolah (Kanan Kop), serta nama Kepala Sekolah &amp; Ketua Panitia untuk unduhan PDF.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReportConfigSection(!showReportConfigSection)}
+                  className="px-3 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {showReportConfigSection ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      <span>Sembunyikan Menu</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span>Buka Menu Pengisian</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {showReportConfigSection && (
+              <div className="p-5 sm:p-6 space-y-6">
+                {/* 1. BAGIAN LOGO KOP REKAPITULASI (KIRI = KEGIATAN, KANAN = SEKOLAH) */}
+                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-2 mb-4 gap-1">
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <ImageIcon className="w-4 h-4 text-emerald-800" />
+                      <span>1. Pengisian Logo Kop Rekapitulasi</span>
+                    </h4>
+                    <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                      Tata Letak Kop Resmi: <strong>Kiri = Logo Kegiatan</strong> · <strong>Kanan = Logo Sekolah</strong>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* LOGO KEGIATAN (KIRI KOP) */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
+                          Logo Kegiatan (Letak di Kiri Kop)
+                        </span>
+                        <span className="text-[10px] text-emerald-800 font-semibold px-2 py-0.5 bg-emerald-100 rounded">
+                          Kiri Kop
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 bg-white rounded-lg border-2 border-emerald-700/30 p-1 flex items-center justify-center shrink-0 shadow-xs">
+                          <LogoRenderer logo={reportConfig.logoKegiatan} alt="Logo Kegiatan" className="w-14 h-14 object-contain" />
+                        </div>
+                        <div className="space-y-2 flex-1">
+                          <div className="text-[11px] font-medium text-slate-600">Pilih Preset Logo Kegiatan:</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPresetKegiatan('pramuka', LOGO_PRAMUKA_SVG)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                reportConfig.logoKegiatanType === 'pramuka'
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              🏕️ Pramuka
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPresetKegiatan('osis', LOGO_OSIS_SVG)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                reportConfig.logoKegiatanType === 'osis'
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              🦅 OSIS SMP
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPresetKegiatan('camp', LOGO_CAMP_SVG)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                reportConfig.logoKegiatanType === 'camp'
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              🔥 Duta Camp
+                            </button>
+                          </div>
+
+                          <div className="pt-1">
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors">
+                              <Upload className="w-3 h-3 text-emerald-800" />
+                              <span>Unggah File Logo Kegiatan (PNG/JPG)</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleUploadLogoKegiatan}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        * Ditampilkan di pojok kiri atas kop surat lembar berita acara rekapitulasi PDF.
+                      </p>
+                    </div>
+
+                    {/* LOGO SEKOLAH (KANAN KOP) */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
+                          Logo Sekolah (Letak di Kanan Kop)
+                        </span>
+                        <span className="text-[10px] text-amber-800 font-semibold px-2 py-0.5 bg-amber-100 rounded">
+                          Kanan Kop
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 bg-white rounded-lg border-2 border-emerald-700/30 p-1 flex items-center justify-center shrink-0 shadow-xs">
+                          <LogoRenderer logo={reportConfig.logoSekolah} alt="Logo Sekolah" className="w-14 h-14 object-contain" />
+                        </div>
+                        <div className="space-y-2 flex-1">
+                          <div className="text-[11px] font-medium text-slate-600">Pilih Preset Logo Sekolah:</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPresetSekolah('pondok_duta', LOGO_SEKOLAH_PONDOK_DUTA_SVG)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                reportConfig.logoSekolahType === 'pondok_duta'
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              🏫 SMPIT Pondok Duta
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSelectPresetSekolah('tut_wuri', LOGO_TUT_WURI_SVG)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
+                                reportConfig.logoSekolahType === 'tut_wuri'
+                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              🎓 Tut Wuri Handayani
+                            </button>
+                          </div>
+
+                          <div className="pt-1">
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors">
+                              <Upload className="w-3 h-3 text-emerald-800" />
+                              <span>Unggah File Logo Sekolah (PNG/JPG)</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                onChange={handleUploadLogoSekolah}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 italic">
+                        * Ditampilkan di pojok kanan atas kop surat lembar berita acara rekapitulasi PDF.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* MINI LIVE PREVIEW OF KOP */}
+                  <div className="mt-4 p-4 bg-white rounded-xl border border-slate-200 shadow-xs">
+                    <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                      Pratinjau Langsung Kop Rekapitulasi:
+                    </div>
+                    <div className="flex items-center justify-between gap-4 p-2 bg-slate-50/50 rounded-lg border border-slate-200">
+                      {/* Kiri: Logo Kegiatan */}
+                      <div className="w-12 h-12 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
+                        <LogoRenderer logo={reportConfig.logoKegiatan} alt="Logo Kegiatan" className="w-10 h-10 object-contain" />
+                      </div>
+
+                      {/* Tengah: Teks Kop */}
+                      <div className="flex-1 text-center">
+                        <div className="text-[9px] font-bold uppercase text-slate-600">YAYASAN PONDOK DUTA</div>
+                        <div className="text-xs font-extrabold uppercase text-emerald-950">SMP ISLAM TERPADU PONDOK DUTA</div>
+                        <div className="text-[10px] font-bold text-slate-800">GUGUS DEPAN GERAKAN PRAMUKA / PANITIA KEGIATAN</div>
+                        <div className="text-[8px] text-slate-500">Jl. Duta Indah No. 1, Cisalak Pasar, Cimanggis, Kota Depok</div>
+                      </div>
+
+                      {/* Kanan: Logo Sekolah */}
+                      <div className="w-12 h-12 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
+                        <LogoRenderer logo={reportConfig.logoSekolah} alt="Logo Sekolah" className="w-10 h-10 object-contain" />
+                      </div>
+                    </div>
+                    <div className="mt-2">
+                      <div className="h-[2px] bg-emerald-950 w-full mb-[1px]"></div>
+                      <div className="h-[0.5px] bg-emerald-950 w-full"></div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. BAGIAN PENGISIAN NAMA KEPALA SEKOLAH & KETUA PANITIA */}
+                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-2 mb-4 gap-1">
+                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <GraduationCap className="w-4 h-4 text-emerald-800" />
+                      <span>2. Pengisian Nama Kepala Sekolah &amp; Ketua Panitia (Tanda Tangan)</span>
+                    </h4>
+                    <span className="text-[11px] text-slate-500">
+                      Nama ini otomatis tertera pada tanda tangan pengesahan bagian bawah PDF
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* KETUA PANITIA (KIRI) */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                        <span className="text-xs font-bold text-slate-800">
+                          Pihak Kiri: Ketua Panitia Pelaksana
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-semibold">(Mengetahui)</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Nama Lengkap &amp; Gelar Ketua Panitia:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.ketuaPanitia.nama}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              ketuaPanitia: { ...reportConfig.ketuaPanitia, nama: e.target.value }
+                            })}
+                            placeholder="Contoh: Kak Muhammad Ilham, S.Pd"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Jabatan / Peran Kepanitiaan:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.ketuaPanitia.jabatan}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              ketuaPanitia: { ...reportConfig.ketuaPanitia, jabatan: e.target.value }
+                            })}
+                            placeholder="Contoh: Ketua Panitia Pelaksana / Ketua Panitia Duta Camp"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            NIP / NRP / Nomor Identitas:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.ketuaPanitia.nip}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              ketuaPanitia: { ...reportConfig.ketuaPanitia, nip: e.target.value }
+                            })}
+                            placeholder="Contoh: NIP. 19850412 201101 1 003"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* KEPALA SEKOLAH / KA. MABIGUS (KANAN) */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between pb-1 border-b border-slate-200">
+                        <span className="text-xs font-bold text-slate-800">
+                          Pihak Kanan: Kepala Sekolah / Ka. Mabigus
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-semibold">(Mengesahkan)</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Nama Lengkap &amp; Gelar Kepala Sekolah:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.kepalaSekolah.nama}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              kepalaSekolah: { ...reportConfig.kepalaSekolah, nama: e.target.value }
+                            })}
+                            placeholder="Contoh: Drs. H. Ahmad Syafi'i, M.Pd"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white font-medium focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            Jabatan Resmi:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.kepalaSekolah.jabatan}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              kepalaSekolah: { ...reportConfig.kepalaSekolah, jabatan: e.target.value }
+                            })}
+                            placeholder="Contoh: Kepala SMPIT Pondok Duta / Ka. Mabigus"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                            NIP / Nomor Identitas:
+                          </label>
+                          <input
+                            type="text"
+                            value={reportConfig.kepalaSekolah.nip}
+                            onChange={(e) => setReportConfig({
+                              ...reportConfig,
+                              kepalaSekolah: { ...reportConfig.kepalaSekolah, nip: e.target.value }
+                            })}
+                            placeholder="Contoh: NIP. 19720815 199802 1 001"
+                            className="w-full p-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Titimangsa Kota */}
+                  <div className="mt-4 flex flex-wrap items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                    <span className="font-semibold text-slate-700">Kota Titimangsa Tanda Tangan:</span>
+                    <input
+                      type="text"
+                      value={reportConfig.titimangsaKota}
+                      onChange={(e) => setReportConfig({ ...reportConfig, titimangsaKota: e.target.value })}
+                      placeholder="Depok"
+                      className="p-1.5 text-xs border border-slate-300 rounded bg-white font-medium w-36"
+                    />
+                    <span className="text-[11px] text-slate-500">
+                      Format hasil pada PDF: <strong>{reportConfig.titimangsaKota || 'Depok'}, {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. TOMBOL AKSI SIMPAN & PREVIEW */}
+                <div className="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResetReportConfig}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset ke Bawaan Resmi</span>
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveReportConfig}
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 active:scale-98 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Simpan Pengaturan Kop &amp; Tanda Tangan</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenPrintReport(selectedCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
+                      className="px-4 py-2 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-98 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                    >
+                      <FileDown className="w-3.5 h-3.5 text-slate-950" />
+                      <span>Pratinjau &amp; Unduh PDF</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Full Tabular & Mobile Card Ranking Section */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Tabel Klasemen & Rekapitulasi Nilai Akhir
-                </h3>
-                <p className="text-xs text-slate-500">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Klasemen &amp; Rekapitulasi Nilai Akhir
+                  </h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    {recapData.length} Peserta
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
                   Sub-Event: {currentAdminSubEvent.nama_event} · Kategori: {activeCategory.nama_kategori} ·{' '}
                   <span className="font-semibold text-emerald-900">
                     {activeCategory.assessment_type === 'public_only'
@@ -1015,84 +1563,272 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </span>
                 </p>
               </div>
+
+              {/* View Switcher: Card View (Optimal for HP) vs Table View */}
+              <div className="flex items-center gap-1.5 self-start sm:self-auto bg-slate-200/80 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setRecapViewMode('card')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    recapViewMode === 'card'
+                      ? 'bg-white text-emerald-950 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Tampilan Kartu (Sangat responsif dan rapi di HP)"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Model Kartu (HP)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRecapViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    recapViewMode === 'table'
+                      ? 'bg-white text-emerald-950 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="Tampilan Tabel Lengkap"
+                >
+                  <Table className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Model Tabel</span>
+                </button>
+              </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100/80 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-4 w-14 text-center">Rank</th>
-                    <th className="py-3 px-4">Nama Peserta / Regu</th>
-                    <th className="py-3 px-4">Pangkalan / Kelas</th>
-                    <th className="py-3 px-4 text-right">Rerata Juri (1-5)</th>
-                    <th className="py-3 px-4 text-right">Skor Juri (100)</th>
-                    <th className="py-3 px-4 text-right">Vote Publik</th>
-                    <th className="py-3 px-4 text-right font-bold text-emerald-900">Nilai Akhir</th>
-                    <th className="py-3 px-4 text-center">Status Penghargaan</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recapData.map((row) => (
-                    <tr
-                      key={row.team.id_team}
-                      className={`hover:bg-slate-50/80 transition-colors ${
-                        row.rank === 1 ? 'bg-amber-50/30' : ''
-                      }`}
-                    >
-                      <td className="py-3 px-4 text-center font-mono font-bold text-slate-700 tabular-nums">
-                        #{row.rank}
-                      </td>
-                      <td className="py-3 px-4 font-bold text-slate-900">
-                        {row.team.nama_regu}
-                        <span className="text-[10px] text-slate-400 block font-normal">
-                          {row.team.tipe_partisipasi === 'Individu' ? 'Individu' : 'Regu'} {row.team.kategori_regu}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-600">{row.team.kelas_pangkalan}</td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
-                        {row.averageJuryScore1to5.toFixed(2)}
-                        <span className="text-[10px] text-slate-400 block">
-                          ({row.juryCount} Juri)
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
-                        {row.convertedJuryScore100.toFixed(2)}
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
-                        {row.publicVoteCount} suara
-                        <span className="text-[10px] text-slate-400 block">
-                          {row.publicVotePercentage}%
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono font-extrabold text-sm text-emerald-900 tabular-nums">
-                        {row.finalWeightedScore.toFixed(2)}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        {row.rank === 1 ? (
-                          <span className="px-2 py-0.5 text-[11px] font-bold text-amber-800 bg-amber-100 rounded">
-                            Juara 1
-                          </span>
-                        ) : row.rank === 2 ? (
-                          <span className="px-2 py-0.5 text-[11px] font-bold text-slate-700 bg-slate-200 rounded">
-                            Juara 2
-                          </span>
-                        ) : row.rank === 3 ? (
-                          <span className="px-2 py-0.5 text-[11px] font-bold text-amber-900 bg-amber-100/70 rounded">
-                            Juara 3
-                          </span>
-                        ) : row.isFavorit ? (
-                          <span className="px-2 py-0.5 text-[11px] font-bold text-rose-700 bg-rose-50 rounded border border-rose-200">
-                            Juara Favorit
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">-</span>
+            {/* =================================================================== */}
+            {/* 1. MODEL KARTU (CARD VIEW) - SANGAT RAPIH DI HP & TABLET */}
+            {/* =================================================================== */}
+            {recapViewMode === 'card' && (
+              <div className="p-3 sm:p-5 bg-slate-50/60">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {recapData.map((row) => {
+                    const isRank1 = row.rank === 1;
+                    const isRank2 = row.rank === 2;
+                    const isRank3 = row.rank === 3;
+                    const isTop3 = row.rank <= 3;
+
+                    return (
+                      <div
+                        key={row.team.id_team}
+                        className={`rounded-2xl border transition-all p-4 flex flex-col justify-between ${
+                          isRank1
+                            ? 'bg-gradient-to-br from-amber-50/90 via-white to-amber-50/30 border-amber-300 ring-2 ring-amber-400/20 shadow-md'
+                            : isRank2
+                            ? 'bg-gradient-to-br from-slate-50 via-white to-slate-100/50 border-slate-300 shadow-sm'
+                            : isRank3
+                            ? 'bg-gradient-to-br from-amber-50/40 via-white to-orange-50/30 border-amber-200/80 shadow-sm'
+                            : 'bg-white border-slate-200 shadow-xs hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          {/* Card Top: Rank & Status Juara + Skor Akhir */}
+                          <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {/* Rank Badge */}
+                              <div
+                                className={`font-mono font-black text-sm px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs ${
+                                  isRank1
+                                    ? 'bg-amber-400 text-slate-950 ring-1 ring-amber-500'
+                                    : isRank2
+                                    ? 'bg-slate-200 text-slate-800'
+                                    : isRank3
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {isRank1 && <Trophy className="w-3.5 h-3.5 text-slate-950 fill-amber-300" />}
+                                <span>#{row.rank}</span>
+                              </div>
+
+                              {/* Status Penghargaan Badge */}
+                              {isRank1 ? (
+                                <span className="px-2.5 py-0.5 text-[11px] font-extrabold text-amber-950 bg-amber-100 border border-amber-300 rounded-full flex items-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-amber-600" />
+                                  <span>JUARA 1</span>
+                                </span>
+                              ) : isRank2 ? (
+                                <span className="px-2 py-0.5 text-[11px] font-bold text-slate-700 bg-slate-200 rounded-full">
+                                  JUARA 2
+                                </span>
+                              ) : isRank3 ? (
+                                <span className="px-2 py-0.5 text-[11px] font-bold text-amber-900 bg-amber-100/80 rounded-full">
+                                  JUARA 3
+                                </span>
+                              ) : row.isFavorit ? (
+                                <span className="px-2 py-0.5 text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-full">
+                                  JUARA FAVORIT
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {/* Nilai Akhir Card Highlight */}
+                            <div className="text-right shrink-0 bg-emerald-50/80 border border-emerald-200/80 px-2.5 py-1 rounded-xl">
+                              <span className="text-[9px] font-extrabold text-emerald-800 uppercase tracking-wider block">
+                                Nilai Akhir
+                              </span>
+                              <span className="text-lg font-black text-emerald-950 font-mono tabular-nums leading-tight">
+                                {row.finalWeightedScore.toFixed(2)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Team Identity */}
+                          <div className="mt-3">
+                            <h4 className="text-base font-extrabold text-slate-900 leading-snug">
+                              {row.team.nama_regu}
+                            </h4>
+                            <div className="flex items-center gap-2 mt-1 text-xs text-slate-600">
+                              <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">
+                                {row.team.tipe_partisipasi === 'Individu' ? 'Individu' : 'Regu'} {row.team.kategori_regu}
+                              </span>
+                              <span className="text-slate-400">·</span>
+                              <span className="truncate">{row.team.kelas_pangkalan}</span>
+                            </div>
+                          </div>
+
+                          {/* Breakdown Nilai: Juri vs Vote Publik Grid */}
+                          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                            {/* Dewan Juri Box */}
+                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 space-y-1">
+                              <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold uppercase">
+                                <span>Dewan Juri</span>
+                                <span>Skala 100</span>
+                              </div>
+                              <div className="flex items-baseline justify-between">
+                                <span className="font-mono text-base font-bold text-slate-900">
+                                  {row.convertedJuryScore100.toFixed(2)}
+                                </span>
+                                <span className="text-[11px] font-medium text-slate-500">
+                                  Rata: {row.averageJuryScore1to5.toFixed(2)}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                Dinilai {row.juryCount} Juri
+                              </div>
+                            </div>
+
+                            {/* Vote Publik Box */}
+                            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 space-y-1">
+                              <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold uppercase">
+                                <span>Vote Publik</span>
+                                <span>{row.publicVotePercentage}%</span>
+                              </div>
+                              <div className="flex items-baseline justify-between">
+                                <span className="font-mono text-base font-bold text-slate-900">
+                                  {row.publicVoteCount}
+                                </span>
+                                <span className="text-[11px] font-medium text-slate-500">
+                                  Suara
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                Skor Norm: {row.normalizedPublicScore100.toFixed(1)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Formula Weight Contribution Footer */}
+                        {activeCategory.assessment_type === 'all' && (
+                          <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
+                            <span>
+                              Kontribusi: Juri <strong>{((row.convertedJuryScore100 * juryWeight) / 100).toFixed(1)}</strong>
+                            </span>
+                            <span>+</span>
+                            <span>
+                              Publik <strong>{((row.normalizedPublicScore100 * publicWeight) / 100).toFixed(1)}</strong>
+                            </span>
+                          </div>
                         )}
-                      </td>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* =================================================================== */}
+            {/* 2. MODEL TABEL (TABULAR VIEW) - BAGI PENGGUNA LAPTOP / DESKTOP */}
+            {/* =================================================================== */}
+            {recapViewMode === 'table' && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100/80 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4 w-14 text-center">Rank</th>
+                      <th className="py-3 px-4">Nama Peserta / Regu</th>
+                      <th className="py-3 px-4">Pangkalan / Kelas</th>
+                      <th className="py-3 px-4 text-right">Rerata Juri (1-5)</th>
+                      <th className="py-3 px-4 text-right">Skor Juri (100)</th>
+                      <th className="py-3 px-4 text-right">Vote Publik</th>
+                      <th className="py-3 px-4 text-right font-bold text-emerald-900">Nilai Akhir</th>
+                      <th className="py-3 px-4 text-center">Status Penghargaan</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {recapData.map((row) => (
+                      <tr
+                        key={row.team.id_team}
+                        className={`hover:bg-slate-50/80 transition-colors ${
+                          row.rank === 1 ? 'bg-amber-50/30' : ''
+                        }`}
+                      >
+                        <td className="py-3 px-4 text-center font-mono font-bold text-slate-700 tabular-nums">
+                          #{row.rank}
+                        </td>
+                        <td className="py-3 px-4 font-bold text-slate-900">
+                          {row.team.nama_regu}
+                          <span className="text-[10px] text-slate-400 block font-normal">
+                            {row.team.tipe_partisipasi === 'Individu' ? 'Individu' : 'Regu'} {row.team.kategori_regu}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">{row.team.kelas_pangkalan}</td>
+                        <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
+                          {row.averageJuryScore1to5.toFixed(2)}
+                          <span className="text-[10px] text-slate-400 block">
+                            ({row.juryCount} Juri)
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
+                          {row.convertedJuryScore100.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700">
+                          {row.publicVoteCount} suara
+                          <span className="text-[10px] text-slate-400 block">
+                            {row.publicVotePercentage}%
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-extrabold text-sm text-emerald-900 tabular-nums">
+                          {row.finalWeightedScore.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          {row.rank === 1 ? (
+                            <span className="px-2 py-0.5 text-[11px] font-bold text-amber-800 bg-amber-100 rounded">
+                              Juara 1
+                            </span>
+                          ) : row.rank === 2 ? (
+                            <span className="px-2 py-0.5 text-[11px] font-bold text-slate-700 bg-slate-200 rounded">
+                              Juara 2
+                            </span>
+                          ) : row.rank === 3 ? (
+                            <span className="px-2 py-0.5 text-[11px] font-bold text-amber-900 bg-amber-100/70 rounded">
+                              Juara 3
+                            </span>
+                          ) : row.isFavorit ? (
+                            <span className="px-2 py-0.5 text-[11px] font-bold text-rose-700 bg-rose-50 rounded border border-rose-200">
+                              Juara Favorit
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1304,9 +2040,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         )}
 
                         {c.assessment_type !== 'public_only' && (
-                          <span className="bg-slate-100 px-2 py-0.5 rounded font-medium">
-                            <strong>{c.kriteria?.length || 0} Pertanyaan</strong> Juri
-                          </span>
+                          <>
+                            <span className="bg-slate-100 px-2 py-0.5 rounded font-medium">
+                              <strong>{c.kriteria?.length || 0} Pertanyaan</strong> Juri
+                            </span>
+                            <span className="bg-amber-50 text-amber-900 border border-amber-200/60 px-2 py-0.5 rounded font-medium flex items-center gap-1">
+                              <Award className="w-3 h-3 text-amber-600 inline shrink-0" />
+                              {(!c.assigned_juries || c.assigned_juries.length === 0)
+                                ? `Semua Juri (${juryUsers.length})`
+                                : `${c.assigned_juries.length} Juri Ditugaskan`}
+                            </span>
+                          </>
                         )}
                       </div>
                     </div>
@@ -1325,7 +2069,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => setEditingCategory({ ...c, assessment_type: c.assessment_type || 'all' })}
+                          onClick={() => setEditingCategory({
+                            ...c,
+                            assessment_type: c.assessment_type || 'all',
+                            assigned_juries: c.assigned_juries || []
+                          })}
                           className="p-1.5 text-slate-500 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                           title="Edit Informasi Cabang Lomba"
                         >
@@ -1558,6 +2306,179 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Section 3: Penugasan Dewan Juri Khusus Cabang Lomba Ini */}
+          <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2 text-xs text-amber-700 font-bold uppercase tracking-wider">
+                  <Award className="w-4 h-4 text-amber-600" />
+                  <span>Penugasan Dewan Juri Khusus</span>
+                  {activeCategory.assessment_type === 'public_only' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                      Non-Aktif (Vote Bebas Saja)
+                    </span>
+                  )}
+                  {activeCategory.assessment_type === 'jury_only' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                      Juri Saja
+                    </span>
+                  )}
+                  {(!activeCategory.assessment_type || activeCategory.assessment_type === 'all') && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      Multi (Vote & Juri)
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                  Pilih Juri yang Bertugas — {activeCategory.nama_kategori}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Admin memiliki kebebasan penuh memilih jumlah dan nama juri yang ditugaskan menilai pada cabang lomba ini.
+                </p>
+              </div>
+
+              {activeCategory.assessment_type !== 'public_only' && (
+                <div className="bg-amber-50 px-4 py-2.5 rounded-xl border border-amber-200 text-right shrink-0">
+                  <span className="text-[11px] text-amber-800 font-medium block">Status Penugasan:</span>
+                  <span className="text-sm font-bold font-mono text-amber-950">
+                    {(!activeCategory.assigned_juries || activeCategory.assigned_juries.length === 0)
+                      ? `Semua Juri (${juryUsers.length} Juri)`
+                      : `${activeCategory.assigned_juries.length} dari ${juryUsers.length} Juri`}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {activeCategory.assessment_type === 'public_only' ? (
+              <div className="p-4 bg-blue-50/80 rounded-xl border border-blue-200 text-blue-900 text-xs flex items-start gap-3">
+                <Users className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Penugasan Juri Tidak Diperlukan</p>
+                  <p className="text-slate-600 mt-0.5">
+                    Cabang lomba ini diatur dengan mode <strong>Vote Bebas Saja</strong>, sehingga pemenang ditentukan murni dari akumulasi vote publik tanpa form juri.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-700">
+                    Centang dewan juri yang bertugas:
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const allIds = juryUsers.map(j => j.id);
+                        const res = apiService.updateCategoryAssignedJuries(activeCategory.id_kategori, allIds);
+                        if (res.success) {
+                          setBannerMsg({ type: 'success', text: res.message });
+                          onRefreshData();
+                          setTimeout(() => setBannerMsg(null), 3000);
+                        }
+                      }}
+                      className="px-2.5 py-1 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 rounded-lg border border-emerald-300 transition-colors"
+                    >
+                      Tugaskan Semua Juri ({juryUsers.length})
+                    </button>
+                    {activeCategory.assigned_juries && activeCategory.assigned_juries.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = apiService.updateCategoryAssignedJuries(activeCategory.id_kategori, []);
+                          if (res.success) {
+                            setBannerMsg({ type: 'success', text: 'Penugasan di-reset: seluruh dewan juri dapat menilai.' });
+                            onRefreshData();
+                            setTimeout(() => setBannerMsg(null), 3000);
+                          }
+                        }}
+                        className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors"
+                      >
+                        Reset (Buka untuk Semua Juri)
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {juryUsers.length === 0 ? (
+                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs">
+                    Belum ada akun dewan juri yang terdaftar. Silakan buat akun juri terlebih dahulu di tab <strong>Manajemen Peserta &amp; Juri</strong>.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {juryUsers.map(jury => {
+                      const isAssigned = (activeCategory.assigned_juries && activeCategory.assigned_juries.length > 0)
+                        ? (activeCategory.assigned_juries.includes(jury.id) || activeCategory.assigned_juries.includes(jury.username))
+                        : true; // default open to all if empty
+                      const isExplicitlyFiltered = activeCategory.assigned_juries && activeCategory.assigned_juries.length > 0;
+
+                      return (
+                        <div
+                          key={jury.id}
+                          onClick={() => {
+                            let currentList = activeCategory.assigned_juries || [];
+                            // If currently empty (open to all), clicking toggles out from all
+                            if (currentList.length === 0) {
+                              currentList = juryUsers.map(j => j.id);
+                            }
+                            const isIncluded = currentList.includes(jury.id) || currentList.includes(jury.username);
+                            const nextList = isIncluded
+                              ? currentList.filter(id => id !== jury.id && id !== jury.username)
+                              : [...currentList, jury.id];
+
+                            const res = apiService.updateCategoryAssignedJuries(activeCategory.id_kategori, nextList);
+                            if (res.success) {
+                              setBannerMsg({ type: 'success', text: res.message });
+                              onRefreshData();
+                              setTimeout(() => setBannerMsg(null), 2500);
+                            }
+                          }}
+                          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 ${
+                            isAssigned
+                              ? 'bg-amber-50/70 border-amber-500 ring-1 ring-amber-500 shadow-xs'
+                              : 'bg-white border-slate-200 opacity-60 hover:opacity-100 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 mt-0.5 border ${
+                            isAssigned
+                              ? 'bg-amber-600 border-amber-600 text-white'
+                              : 'border-slate-300 bg-white'
+                          }`}>
+                            {isAssigned && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                          </div>
+                          <div className="min-w-0 flex-1 text-xs">
+                            <div className="font-bold text-slate-900 truncate">{jury.nama}</div>
+                            <div className="text-[11px] text-emerald-800 font-medium truncate mt-0.5">
+                              {jury.jurySpecialty || `@${jury.username}`}
+                            </div>
+                            <div className="mt-2 flex items-center gap-1.5">
+                              {isAssigned ? (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
+                                  {isExplicitlyFiltered ? 'Ditugaskan Khusus' : 'Aktif Bertugas'}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-medium text-slate-400">
+                                  Tidak Ditugaskan
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-[11px] text-slate-600 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>
+                    Hanya dewan juri dengan tanda centang di atas yang akan dapat mengisi formulir dan memberikan nilai pada cabang lomba <strong>{activeCategory.nama_kategori}</strong>.
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2424,6 +3345,92 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
               )}
 
+              {/* Penugasan Dewan Juri (Kebebasan Memilih Jumlah & Nama Juri) */}
+              {newCatAssessmentType !== 'public_only' ? (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-amber-600" />
+                      <label className="font-bold text-slate-800 text-xs">
+                        Penugasan Dewan Juri *
+                      </label>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        {newCatAssignedJuries.length === 0
+                          ? `Semua Juri (${juryUsers.length})`
+                          : `${newCatAssignedJuries.length} Juri Dipilih`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setNewCatAssignedJuries(juryUsers.map(j => j.id))}
+                        className="px-2 py-0.5 font-semibold text-emerald-800 hover:bg-emerald-100 rounded border border-emerald-300 transition-colors"
+                      >
+                        Pilih Semua ({juryUsers.length})
+                      </button>
+                      {newCatAssignedJuries.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setNewCatAssignedJuries([])}
+                          className="px-2 py-0.5 font-semibold text-slate-600 hover:bg-slate-200 rounded border border-slate-300 transition-colors"
+                        >
+                          Reset (Semua)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-tight">
+                    Pilih nama-nama juri yang ditugaskan menilai. Jika tidak memilih satupun, maka <strong>seluruh dewan juri ({juryUsers.length} orang)</strong> berhak menilai.
+                  </p>
+
+                  {juryUsers.length === 0 ? (
+                    <div className="p-2.5 bg-amber-50 rounded-lg text-amber-900 text-[11px]">
+                      Belum ada dewan juri terdaftar. Tambahkan akun juri di menu Manajemen Juri.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                      {juryUsers.map(jury => {
+                        const isSelected = newCatAssignedJuries.includes(jury.id);
+                        return (
+                          <div
+                            key={jury.id}
+                            onClick={() => {
+                              setNewCatAssignedJuries(prev =>
+                                isSelected ? prev.filter(id => id !== jury.id) : [...prev, jury.id]
+                              );
+                            }}
+                            className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-50/80 border-amber-500 text-amber-950 ring-1 ring-amber-500 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100/70'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                              isSelected ? 'bg-amber-600 border-amber-600 text-white' : 'border-slate-300 bg-white'
+                            }`}>
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-xs truncate">{jury.nama}</div>
+                              <div className="text-[10px] text-slate-500 truncate">
+                                {jury.jurySpecialty || `@${jury.username}`}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Mode <strong>Vote Bebas Saja</strong>: Penjurian dewan juri tidak digunakan pada cabang lomba ini.</span>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-800 mb-1">Deskripsi Singkat</label>
                 <textarea
@@ -2620,6 +3627,103 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Penugasan Dewan Juri (Kebebasan Memilih Jumlah & Nama Juri) */}
+              {editingCategory.assessment_type !== 'public_only' ? (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-amber-600" />
+                      <label className="font-bold text-slate-800 text-xs">
+                        Penugasan Dewan Juri *
+                      </label>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        {(!editingCategory.assigned_juries || editingCategory.assigned_juries.length === 0)
+                          ? `Semua Juri (${juryUsers.length})`
+                          : `${editingCategory.assigned_juries.length} Juri Dipilih`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setEditingCategory({
+                          ...editingCategory,
+                          assigned_juries: juryUsers.map(j => j.id)
+                        })}
+                        className="px-2 py-0.5 font-semibold text-emerald-800 hover:bg-emerald-100 rounded border border-emerald-300 transition-colors"
+                      >
+                        Pilih Semua ({juryUsers.length})
+                      </button>
+                      {editingCategory.assigned_juries && editingCategory.assigned_juries.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingCategory({
+                            ...editingCategory,
+                            assigned_juries: []
+                          })}
+                          className="px-2 py-0.5 font-semibold text-slate-600 hover:bg-slate-200 rounded border border-slate-300 transition-colors"
+                        >
+                          Reset (Semua)
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500 leading-tight">
+                    Pilih juri-juri yang ditugaskan khusus untuk cabang lomba ini. Jika dikosongkan/reset, maka <strong>seluruh dewan juri ({juryUsers.length} orang)</strong> berhak menilai.
+                  </p>
+
+                  {juryUsers.length === 0 ? (
+                    <div className="p-2.5 bg-amber-50 rounded-lg text-amber-900 text-[11px]">
+                      Belum ada dewan juri terdaftar. Tambahkan akun juri di menu Manajemen Juri.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                      {juryUsers.map(jury => {
+                        const currentAssigned = editingCategory.assigned_juries || [];
+                        const isSelected = currentAssigned.includes(jury.id) || currentAssigned.includes(jury.username);
+                        return (
+                          <div
+                            key={jury.id}
+                            onClick={() => {
+                              const nextList = isSelected
+                                ? currentAssigned.filter(id => id !== jury.id && id !== jury.username)
+                                : [...currentAssigned, jury.id];
+                              setEditingCategory({
+                                ...editingCategory,
+                                assigned_juries: nextList
+                              });
+                            }}
+                            className={`p-2.5 rounded-xl border text-left flex items-center gap-2.5 transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-50/80 border-amber-500 text-amber-950 ring-1 ring-amber-500 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100/70'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                              isSelected ? 'bg-amber-600 border-amber-600 text-white' : 'border-slate-300 bg-white'
+                            }`}>
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="font-bold text-xs truncate">{jury.nama}</div>
+                              <div className="text-[10px] text-slate-500 truncate">
+                                {jury.jurySpecialty || `@${jury.username}`}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-xs flex items-center gap-2">
+                  <Users className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Mode <strong>Vote Bebas Saja</strong>: Penjurian dewan juri tidak digunakan pada cabang lomba ini.</span>
                 </div>
               )}
 

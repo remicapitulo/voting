@@ -5,8 +5,13 @@ import {
   TeamModel,
   JuryScore,
   PublicVote,
-  ScoreRecapItem
+  ScoreRecapItem,
+  ReportConfig
 } from '../types';
+import {
+  LOGO_SEKOLAH_PONDOK_DUTA_SVG,
+  LOGO_PRAMUKA_SVG
+} from '../utils/reportLogos';
 import {
   INITIAL_EVENT,
   INITIAL_EVENTS,
@@ -27,7 +32,8 @@ const STORAGE_KEYS = {
   USERS: 'duta_camp_users',
   JURY_SCORES: 'duta_camp_jury_scores',
   PUBLIC_VOTES: 'duta_camp_public_votes',
-  WEIGHTS: 'duta_camp_weights' // e.g. { jury: 70, public: 30 }
+  WEIGHTS: 'duta_camp_weights', // e.g. { jury: 70, public: 30 }
+  REPORT_CONFIG: 'duta_camp_report_config'
 };
 
 export interface AppStateData {
@@ -231,6 +237,23 @@ class ApiService {
               kriteriaArr = c.kriteria.split(',').map((s: string) => s.trim()).filter(Boolean);
             }
           }
+
+          let assignedJuriesArr: string[] = [];
+          if (Array.isArray(c.assigned_juries)) {
+            assignedJuriesArr = c.assigned_juries.map((j: any) => String(j).trim()).filter(Boolean);
+          } else if (typeof c.assigned_juries === 'string' && c.assigned_juries.trim().length > 0) {
+            try {
+              const parsed = JSON.parse(c.assigned_juries);
+              if (Array.isArray(parsed)) {
+                assignedJuriesArr = parsed.map((j: any) => String(j).trim()).filter(Boolean);
+              } else if (parsed) {
+                assignedJuriesArr = [String(parsed).trim()];
+              }
+            } catch {
+              assignedJuriesArr = c.assigned_juries.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
+          }
+
           categories.push({
             id_kategori: id,
             id_event: String(c.id_event || ''),
@@ -243,7 +266,8 @@ class ApiService {
             votes_required: Number(c.votes_required) || 1,
             kriteria: kriteriaArr,
             deskripsi: c.deskripsi ? String(c.deskripsi) : '',
-            iconName: c.iconName || 'Trophy'
+            iconName: c.iconName || 'Trophy',
+            assigned_juries: assignedJuriesArr
           });
         }
       }
@@ -298,15 +322,26 @@ class ApiService {
         const uname = String(u.username || '').trim().toLowerCase();
         if (uname && !seenUsernames.has(uname)) {
           seenUsernames.add(uname);
+          let emailWa = String(u.emailOrWa || '').trim();
+          let createdAt = String(u.created_at || '').trim();
+          let specialty = String(u.jurySpecialty || '').trim();
+
+          // Deteksi jika terjadi pergeseran kolom (misal: nomor wa masuk ke kolom created_at)
+          if (createdAt && !createdAt.includes('T') && /^[0-9+]+$/.test(createdAt)) {
+            emailWa = createdAt;
+            createdAt = (specialty && specialty.includes('T')) ? specialty : new Date().toISOString();
+            specialty = '';
+          }
+
           users.push({
             id: String(u.id || `user-${Date.now()}`),
             username: uname,
             nama: String(u.nama || ''),
             role: u.role || 'voter',
-            emailOrWa: u.emailOrWa || '',
-            jurySpecialty: u.jurySpecialty || '',
+            emailOrWa: emailWa,
+            jurySpecialty: specialty,
             password: u.password ? String(u.password) : undefined,
-            created_at: u.created_at || new Date().toISOString()
+            created_at: createdAt || new Date().toISOString()
           });
         }
       }
@@ -961,6 +996,29 @@ class ApiService {
     };
   }
 
+  public updateCategoryAssignedJuries(categoryId: string, assignedJuries: string[]): { success: boolean; message: string } {
+    const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
+    const idx = categories.findIndex(c => c.id_kategori === categoryId);
+    if (idx === -1) return { success: false, message: 'Kategori tidak ditemukan' };
+
+    const validJuries = assignedJuries.map(j => j.trim()).filter(j => j.length > 0);
+    categories[idx].assigned_juries = validJuries;
+    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
+
+    if (this.gasUrl) {
+      fetch(this.gasUrl, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'manageCategory', operation: 'update', ...categories[idx] })
+      }).catch(console.warn);
+    }
+
+    const countText = validJuries.length === 0 ? 'Semua dewan juri' : `${validJuries.length} dewan juri`;
+    return {
+      success: true,
+      message: `Penugasan dewan juri untuk "${categories[idx].nama_kategori}" berhasil diperbarui (${countText}).`
+    };
+  }
+
   public async submitJuryScore(
     juryId: string,
     juryName: string,
@@ -1253,6 +1311,38 @@ class ApiService {
 
   public getWeights(): { jury: number; public: number } {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.WEIGHTS) || JSON.stringify({ jury: 70, public: 30 }));
+  }
+
+  public getReportConfig(): ReportConfig {
+    const saved = localStorage.getItem(STORAGE_KEYS.REPORT_CONFIG);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.warn('Failed parsing report config', e);
+      }
+    }
+    return {
+      kepalaSekolah: {
+        nama: "Drs. H. Ahmad Syafi'i, M.Pd",
+        jabatan: "Kepala SMPIT Pondok Duta / Ka. Mabigus",
+        nip: "NIP. 19720815 199802 1 001"
+      },
+      ketuaPanitia: {
+        nama: "Kak Muhammad Ilham, S.Pd",
+        jabatan: "Ketua Panitia Pelaksana",
+        nip: "NIP. 19850412 201101 1 003"
+      },
+      titimangsaKota: "Depok",
+      logoSekolah: LOGO_SEKOLAH_PONDOK_DUTA_SVG,
+      logoSekolahType: 'pondok_duta',
+      logoKegiatan: LOGO_PRAMUKA_SVG,
+      logoKegiatanType: 'pramuka'
+    };
+  }
+
+  public saveReportConfig(config: ReportConfig): void {
+    localStorage.setItem(STORAGE_KEYS.REPORT_CONFIG, JSON.stringify(config));
   }
 
   /**

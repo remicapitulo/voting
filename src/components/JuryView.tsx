@@ -198,6 +198,13 @@ export const JuryView: React.FC<JuryViewProps> = ({
     s => s.id_jury === currentUser.id && s.id_kategori === selectedCategoryId
   );
 
+  const isAssignedToActiveCategory = useMemo(() => {
+    if (!currentUser || currentUser.role === 'admin') return true;
+    if (!activeCategory.assigned_juries || activeCategory.assigned_juries.length === 0) return true;
+    return activeCategory.assigned_juries.includes(currentUser.id) ||
+           activeCategory.assigned_juries.includes(currentUser.username);
+  }, [activeCategory, currentUser]);
+
   const totalTeams = subEventTeams.length;
   const gradedTeamsCount = myCategoryScores.filter(s => s.is_final).length;
   const progressPercent = totalTeams > 0 ? Math.round((gradedTeamsCount / totalTeams) * 100) : 0;
@@ -439,6 +446,9 @@ export const JuryView: React.FC<JuryViewProps> = ({
               const countGradedInCat = juryScores.filter(
                 s => s.id_jury === currentUser.id && s.id_kategori === c.id_kategori && s.is_final
               ).length;
+              const isAssigned = (!c.assigned_juries || c.assigned_juries.length === 0)
+                ? true
+                : (currentUser.role === 'admin' || c.assigned_juries.includes(currentUser.id) || c.assigned_juries.includes(currentUser.username));
 
               return (
                 <button
@@ -455,8 +465,13 @@ export const JuryView: React.FC<JuryViewProps> = ({
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
-                  <span className="truncate">{c.nama_kategori}</span>
-                  <span className={`text-[11px] font-mono tabular-nums px-2 py-0.5 rounded ${
+                  <div className="truncate pr-2">
+                    <span className="truncate">{c.nama_kategori}</span>
+                    {!isAssigned && (
+                      <span className="text-[10px] text-amber-500 font-normal block">Bukan Penilai</span>
+                    )}
+                  </div>
+                  <span className={`text-[11px] font-mono tabular-nums px-2 py-0.5 rounded shrink-0 ${
                     isSelected ? 'bg-emerald-800 text-amber-300' : 'bg-slate-200 text-slate-600'
                   }`}>
                     {countGradedInCat}/{subEventTeams.length}
@@ -467,6 +482,22 @@ export const JuryView: React.FC<JuryViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Alert if Jury is not assigned to this category */}
+      {!isAssignedToActiveCategory && (
+        <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-950 flex items-start gap-3 shadow-xs">
+          <Award className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <div className="font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
+              <span>Khusus Juri yang Ditugaskan</span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-200 text-amber-950">Mode Pratinjau Nilai</span>
+            </div>
+            <p className="mt-1 leading-relaxed text-slate-700">
+              Cabang lomba <strong>{activeCategory.nama_kategori}</strong> memiliki penugasan dewan juri khusus dari panitia. Akun Anda tidak termasuk dalam daftar juri yang ditugaskan pada cabang lomba ini, sehingga form input penilaian dinonaktifkan.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Alert if Sub-Event is Closed or Inactive */}
       {isSubEventClosed && (
@@ -683,17 +714,27 @@ export const JuryView: React.FC<JuryViewProps> = ({
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => handleOpenScoring(team)}
-                    className={`w-full py-2 px-3 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
-                      isGraded
-                        ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                        : 'bg-emerald-800 text-white hover:bg-emerald-700'
-                    }`}
-                  >
-                    {isGraded ? <Edit3 className="w-3.5 h-3.5" /> : <Award className="w-3.5 h-3.5" />}
-                    <span>{isGraded ? 'Lihat / Edit Nilai' : 'Mulai Menilai'}</span>
-                  </button>
+                  {!isAssignedToActiveCategory ? (
+                    <button
+                      disabled
+                      className="w-full py-2 px-3 text-xs font-semibold rounded-lg bg-slate-100 text-slate-400 cursor-not-allowed flex items-center justify-center gap-1.5"
+                    >
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Bukan Juri Penilai</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleOpenScoring(team)}
+                      className={`w-full py-2 px-3 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                        isGraded
+                          ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          : 'bg-emerald-800 text-white hover:bg-emerald-700'
+                      }`}
+                    >
+                      {isGraded ? <Edit3 className="w-3.5 h-3.5" /> : <Award className="w-3.5 h-3.5" />}
+                      <span>{isGraded ? 'Lihat / Edit Nilai' : 'Mulai Menilai'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             );
