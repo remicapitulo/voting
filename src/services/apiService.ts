@@ -47,6 +47,74 @@ export interface AppStateData {
   weights: { jury: number; public: number };
 }
 
+// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta)
+export const DRIVE_LOGO_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';
+
+export const DEFAULT_CRITERIA_MAP: Record<string, string[]> = {
+  'cat-chef': [
+    'Cita Rasa & Kelezatan Masakan Rimba',
+    'Penyajian & Kebersihan Area Memasak',
+    'Efisiensi Bahan & Kandungan Gizi',
+    'Kerjasama Tim & Ketepatan Waktu (Manajemen Waktu)'
+  ],
+  'cat-campfire': [
+    'Kreativitas & Orisinalitas Konsep',
+    'Kekompakan & Harmonisasi Regu',
+    'Penjiwaan & Pembawaan Pesan Moral/Islami',
+    'Kerapian Seragam & Tata Panggung'
+  ],
+  'cat-rover': [
+    'Ketepatan & Kecepatan Sandi / Morse / Semaphore',
+    'Kekuatan & Kerapian Simpul / Ikatan Pionering',
+    'Kesiapsiagaan Pos P3K & Navigasi Kompas',
+    'Disiplin, Yel-Yel & Semangat Kebersamaan Regu'
+  ],
+  'cat-phbi-pildacil': [
+    "Kesesuaian Tema & Kedalaman Dalil Al-Qur'an/Hadits",
+    'Retorika, Artikulasi & Intonasi Vokal',
+    'Adab, Sikap & Kerapian Busana Muslim',
+    'Ketepatan Alokasi Waktu (Max 7 Menit)'
+  ],
+  'cat-phbi-tahfidz': [
+    'Kelancaran & Ketepatan Hafalan (Tahfidz)',
+    'Kaidah Tajwid (Makharijul Huruf & Shifatul Huruf)',
+    'Fashahah & Keindahan Lagu/Tartil',
+    "Adab Membaca Kitab Suci Al-Qur'an"
+  ],
+  'cat-phbi-hadroh': [
+    'Kekompakan Ketukan & Ritme Tabuhan Rebana',
+    'Harmonisasi Vokal Utama & Backing Vokal',
+    'Kesesuaian Syair Sholawat & Makhraj Bahasa Arab',
+    'Kerapian Seragam & Koreografi Panggung'
+  ],
+  'cat-phbn-orasi': [
+    'Bobot Materi & Kedalaman Gagasan Kebangsaan',
+    'Vokal, Artikulasi & Daya Gugah Orator',
+    'Penguasaan Panggung & Bahasa Tubuh (Gestur)',
+    'Ketepatan Durasi Orasi'
+  ]
+};
+
+export function getFallbackCriteria(catId: string, catName: string = ''): string[] {
+  if (DEFAULT_CRITERIA_MAP[catId]) {
+    return DEFAULT_CRITERIA_MAP[catId];
+  }
+  const lower = catName.toLowerCase();
+  if (lower.includes('chef') || lower.includes('masak')) return DEFAULT_CRITERIA_MAP['cat-chef'];
+  if (lower.includes('campfire') || lower.includes('api unggun') || lower.includes('pentas')) return DEFAULT_CRITERIA_MAP['cat-campfire'];
+  if (lower.includes('rover') || lower.includes('jelajah') || lower.includes('tangkas')) return DEFAULT_CRITERIA_MAP['cat-rover'];
+  if (lower.includes('orasi') || lower.includes('pidato') || lower.includes('pildacil')) return DEFAULT_CRITERIA_MAP['cat-phbn-orasi'];
+  if (lower.includes('tahfidz') || lower.includes('quran')) return DEFAULT_CRITERIA_MAP['cat-phbi-tahfidz'];
+  if (lower.includes('hadroh') || lower.includes('musik')) return DEFAULT_CRITERIA_MAP['cat-phbi-hadroh'];
+
+  return [
+    'Kreativitas & Orisinalitas',
+    'Penguasaan Materi & Teknik',
+    'Kekompakan & Kerjasama Tim',
+    'Kerapian, Adab & Kedisiplinan'
+  ];
+}
+
 // URL Default Google Apps Script (Telah disematkan permanen ke sistem):
 export const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwc-f56iuEqEO-IhjALRKfL0f6pVWZGA0mRC4CSS5UzVUMm0hbgBYjHUycNjIvEPubJ/exec';
 
@@ -229,12 +297,47 @@ class ApiService {
           seenCatIds.add(id);
           let kriteriaArr: string[] = [];
           if (Array.isArray(c.kriteria)) {
-            kriteriaArr = c.kriteria;
+            kriteriaArr = c.kriteria.map((k: any) => String(k).trim()).filter(Boolean);
           } else if (typeof c.kriteria === 'string' && c.kriteria.trim().length > 0) {
             try {
-              kriteriaArr = JSON.parse(c.kriteria);
+              const parsed = JSON.parse(c.kriteria);
+              if (Array.isArray(parsed)) {
+                kriteriaArr = parsed.map((k: any) => String(k).trim()).filter(Boolean);
+              } else if (parsed) {
+                kriteriaArr = [String(parsed).trim()];
+              }
             } catch {
               kriteriaArr = c.kriteria.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
+          }
+
+          // Pencegahan "0 Kriteria": Jika kriteria dari remote database kosong
+          // (misal karena row di spreadsheet belum terisi kriteria),
+          // gunakan data cache lokal yang sudah tersimpan atau fallback cerdas,
+          // lalu otomatis kirim pembaruan ke Google Sheets agar database terisi permanen.
+          if (kriteriaArr.length === 0) {
+            try {
+              const localCats: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
+              const existingLocal = localCats.find(el => el.id_kategori === id);
+              if (existingLocal && existingLocal.kriteria && existingLocal.kriteria.length > 0) {
+                kriteriaArr = existingLocal.kriteria;
+              } else {
+                kriteriaArr = getFallbackCriteria(id, String(c.nama_kategori || ''));
+              }
+            } catch {
+              kriteriaArr = getFallbackCriteria(id, String(c.nama_kategori || ''));
+            }
+
+            // Auto-heal Google Sheets jika URL target tersedia
+            if (targetUrl && kriteriaArr.length > 0) {
+              fetch(targetUrl, {
+                method: 'POST',
+                body: JSON.stringify({
+                  action: 'updateCategoryCriteria',
+                  id_kategori: id,
+                  kriteria: kriteriaArr
+                })
+              }).catch(() => {});
             }
           }
 
@@ -437,6 +540,20 @@ class ApiService {
       }
       localStorage.setItem(STORAGE_KEYS.JURY_SCORES, JSON.stringify(juryScores));
       localStorage.setItem(STORAGE_KEYS.PUBLIC_VOTES, JSON.stringify(publicVotes));
+
+      // Sinkronkan Konfigurasi Lembar Rekap Resmi & Logo dari Google Sheets jika tersedia di server
+      if (rawData.config && rawData.config.report_config) {
+        try {
+          const cfg = typeof rawData.config.report_config === 'object'
+            ? rawData.config.report_config
+            : JSON.parse(rawData.config.report_config);
+          if (cfg && (cfg.kepalaSekolah || cfg.logoSekolah || cfg.logoKegiatan)) {
+            localStorage.setItem(STORAGE_KEYS.REPORT_CONFIG, JSON.stringify(cfg));
+          }
+        } catch (e) {
+          console.warn('Sync report_config skipped:', e);
+        }
+      }
 
       return {
         success: true,
@@ -977,7 +1094,7 @@ class ApiService {
     };
   }
 
-  public updateCategoryCriteria(categoryId: string, newCriteria: string[]): { success: boolean; message: string } {
+  public async updateCategoryCriteria(categoryId: string, newCriteria: string[]): Promise<{ success: boolean; message: string }> {
     const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
     const idx = categories.findIndex(c => c.id_kategori === categoryId);
     if (idx === -1) return { success: false, message: 'Kategori tidak ditemukan' };
@@ -990,9 +1107,31 @@ class ApiService {
     categories[idx].kriteria = validCriteria;
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
 
+    let gasSaved = false;
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'updateCategoryCriteria',
+            id_kategori: categoryId,
+            kriteria: validCriteria
+          })
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          gasSaved = true;
+        }
+      } catch (e) {
+        console.warn('Gagal sinkron kriteria ke GAS, tersimpan lokal:', e);
+      }
+    }
+
     return {
       success: true,
-      message: `Pertanyaan form juri untuk "${categories[idx].nama_kategori}" berhasil diperbarui (${validCriteria.length} pertanyaan).`
+      message: gasSaved
+        ? `Alhamdulillah! ${validCriteria.length} pertanyaan form juri untuk "${categories[idx].nama_kategori}" berhasil disimpan permanen ke Google Sheets (terbuka di semua device).`
+        : `Pertanyaan form juri untuk "${categories[idx].nama_kategori}" berhasil disimpan (${validCriteria.length} pertanyaan).`
     };
   }
 
@@ -1341,8 +1480,85 @@ class ApiService {
     };
   }
 
-  public saveReportConfig(config: ReportConfig): void {
+  /**
+   * Mengunggah file logo (base64) langsung ke Google Drive Folder:
+   * Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7
+   * Mengembalikan Direct View URL yang bisa langsung di-embed dan dipakai di PDF
+   */
+  public async uploadLogoToDrive(
+    base64Data: string,
+    fileName: string,
+    mimeType: string = 'image/png'
+  ): Promise<{ success: boolean; fileUrl?: string; message: string }> {
+    if (!this.gasUrl) {
+      return {
+        success: false,
+        message: 'URL Google Apps Script belum terhubung. Logo disimpan secara lokal.'
+      };
+    }
+
+    try {
+      const res = await fetch(this.gasUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'uploadLogo',
+          base64: base64Data,
+          fileName: fileName || `logo_${Date.now()}.png`,
+          mimeType: mimeType,
+          folderId: DRIVE_LOGO_FOLDER_ID
+        })
+      });
+
+      const data = await res.json();
+      if (data.status === 'success' && data.fileUrl) {
+        return {
+          success: true,
+          fileUrl: data.fileUrl,
+          message: 'Logo berhasil disimpan ke Google Drive (Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7)!'
+        };
+      }
+
+      return {
+        success: false,
+        message: data.message || 'Gagal menyimpan logo ke Google Drive.'
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Koneksi Google Drive terganggu: ${err.message || 'Gagal mengunggah logo'}`
+      };
+    }
+  }
+
+  public async saveReportConfig(config: ReportConfig): Promise<{ success: boolean; message: string }> {
     localStorage.setItem(STORAGE_KEYS.REPORT_CONFIG, JSON.stringify(config));
+
+    let gasSaved = false;
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'saveConfig',
+            key: 'report_config',
+            value: config
+          })
+        });
+        const json = await res.json();
+        if (json.status === 'success') {
+          gasSaved = true;
+        }
+      } catch (err) {
+        console.warn('Gagal sync reportConfig ke Google Sheets:', err);
+      }
+    }
+
+    return {
+      success: true,
+      message: gasSaved
+        ? 'Pengaturan Lembar Rekap Resmi & Logo berhasil disimpan permanen ke Google Sheets (terbuka di semua device).'
+        : 'Pengaturan Lembar Rekap disimpan secara lokal.'
+    };
   }
 
   /**

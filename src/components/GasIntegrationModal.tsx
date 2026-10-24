@@ -95,7 +95,8 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
     { name: 'Categories', columns: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi'] },
     { name: 'Teams', columns: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota'] },
     { name: 'Jury_Scores', columns: ['id_score', 'id_jury', 'jury_name', 'id_team', 'id_kategori', 'skor_1_to_5', 'catatan', 'kriteria_scores', 'is_final', 'timestamp'] },
-    { name: 'Public_Votes', columns: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp'] }
+    { name: 'Public_Votes', columns: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp'] },
+    { name: 'Config', columns: ['key', 'value', 'updated_at'] }
   ];
 
   return (

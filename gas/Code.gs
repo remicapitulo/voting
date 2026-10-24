@@ -16,8 +16,12 @@ var SHEETS = {
   CATEGORIES: 'Categories',
   TEAMS: 'Teams',
   JURY_SCORES: 'Jury_Scores',
-  PUBLIC_VOTES: 'Public_Votes'
+  PUBLIC_VOTES: 'Public_Votes',
+  CONFIG: 'Config'
 };
+
+// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta)
+var DRIVE_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';
 
 var SCHEMAS = [
   {
@@ -43,6 +47,10 @@ var SCHEMAS = [
   {
     name: SHEETS.PUBLIC_VOTES,
     headers: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp']
+  },
+  {
+    name: SHEETS.CONFIG,
+    headers: ['key', 'value', 'updated_at']
   }
 ];
 
@@ -411,6 +419,18 @@ function doPost(e) {
       case 'submitPublicVote':
         response = handleSubmitPublicVote(body);
         break;
+      case 'updateCategoryCriteria':
+        response = handleUpdateCategoryCriteria(body);
+        break;
+      case 'uploadLogo':
+        response = handleUploadLogoToDrive(body);
+        break;
+      case 'saveConfig':
+        response = handleSaveConfig(body);
+        break;
+      case 'getConfig':
+        response = handleGetConfig(body.key);
+        break;
       case 'manageCategory':
         response = handleManageCategory(body);
         break;
@@ -447,7 +467,8 @@ function getAllDatabaseData() {
     categories: getSheetDataAsObjects(ss.getSheetByName(SHEETS.CATEGORIES)),
     teams: getSheetDataAsObjects(ss.getSheetByName(SHEETS.TEAMS)),
     jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
-    public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES))
+    public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),
+    config: getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'))
   };
 }
 
@@ -957,4 +978,188 @@ function getSheetDataAsObjects(sheet) {
     results.push(obj);
   }
   return results;
+}
+
+/**
+ * =========================================================================
+ * PERTANYAAN / KRITERIA DEWAN JURI (PERSISTENSI RESMI GOOGLE SHEETS)
+ * =========================================================================
+ */
+function handleUpdateCategoryCriteria(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  }
+
+  var idKategori = String(data.id_kategori || '').trim();
+  if (!idKategori) {
+    return { status: 'error', message: 'ID Kategori tidak disertakan' };
+  }
+
+  ensureHeaderExists(sheet, 'kriteria');
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) {
+    return { status: 'error', message: 'Data kategori di spreadsheet masih kosong' };
+  }
+
+  var headers = rows[0];
+  var idCol = headers.indexOf('id_kategori');
+  var kriteriaCol = headers.indexOf('kriteria');
+  if (idCol === -1) idCol = 0;
+  if (kriteriaCol === -1) kriteriaCol = 7;
+
+  var kriteriaStr = Array.isArray(data.kriteria)
+    ? JSON.stringify(data.kriteria)
+    : String(data.kriteria || '[]');
+
+  var found = false;
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][idCol]).trim() === idKategori) {
+      sheet.getRange(r + 1, kriteriaCol + 1).setValue(kriteriaStr);
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    return { status: 'error', message: 'Cabang lomba dengan ID ' + idKategori + ' tidak ditemukan di sheet Categories' };
+  }
+
+  return {
+    status: 'success',
+    message: 'Kriteria pertanyaan dewan juri berhasil disimpan permanen ke Google Sheets!',
+    id_kategori: idKategori,
+    kriteria: data.kriteria
+  };
+}
+
+/**
+ * =========================================================================
+ * GOOGLE DRIVE LOGO & ASSET UPLOADER
+ * Menyimpan Logo Sekolah / Kegiatan ke Google Drive Folder Khusus
+ * Folder ID Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7
+ * =========================================================================
+ */
+function handleUploadLogoToDrive(data) {
+  try {
+    var targetFolderId = String(data.folderId || DRIVE_FOLDER_ID).trim();
+    var folder;
+    try {
+      folder = DriveApp.getFolderById(targetFolderId);
+    } catch (folderErr) {
+      folder = DriveApp.getRootFolder();
+    }
+
+    var base64Data = data.base64 || data.base64Data || '';
+    if (base64Data.indexOf(';base64,') > -1) {
+      base64Data = base64Data.split(';base64,')[1];
+    }
+
+    if (!base64Data) {
+      return { status: 'error', message: 'Data gambar base64 kosong' };
+    }
+
+    var mimeType = data.mimeType || 'image/png';
+    var fileName = data.fileName || ('logo-' + new Date().getTime() + '.png');
+
+    var decodedBytes = Utilities.base64Decode(base64Data);
+    var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
+    var file = folder.createFile(blob);
+
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {
+      Logger.log('Set sharing warning: ' + shareErr);
+    }
+
+    var fileId = file.getId();
+    var directViewUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+    var downloadUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+
+    return {
+      status: 'success',
+      fileId: fileId,
+      fileUrl: directViewUrl,
+      downloadUrl: downloadUrl,
+      fileName: fileName,
+      message: 'Logo berhasil diunggah dan disimpan ke Google Drive!'
+    };
+  } catch (err) {
+    return { status: 'error', message: 'Gagal mengunggah logo ke Google Drive: ' + err.toString() };
+  }
+}
+
+/**
+ * =========================================================================
+ * PENGATURAN KOP & REKAPITULASI (PERSISTENSI RESMI GOOGLE SHEETS)
+ * Menyimpan Nama Kepala Sekolah, Ketua Panitia, Kota, dan Link Logo Drive
+ * =========================================================================
+ */
+function handleSaveConfig(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+    sheet.appendRow(['key', 'value', 'updated_at']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+  }
+
+  var key = String(data.key || '').trim();
+  var value = typeof data.value === 'object' ? JSON.stringify(data.value) : String(data.value || '');
+  var ts = new Date().toISOString();
+
+  if (!key) return { status: 'error', message: 'Key config tidak boleh kosong' };
+
+  var rows = sheet.getDataRange().getValues();
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][0]).trim() === key) {
+      sheet.getRange(r + 1, 2).setValue(value);
+      sheet.getRange(r + 1, 3).setValue(ts);
+      return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil diperbarui di Google Sheets.' };
+    }
+  }
+
+  sheet.appendRow([key, value, ts]);
+  return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil disimpan di Google Sheets.' };
+}
+
+function handleGetConfig(key) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  if (!sheet) return { status: 'error', message: 'Sheet Config belum tersedia' };
+  var rows = sheet.getDataRange().getValues();
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][0]).trim() === String(key).trim()) {
+      var val = rows[r][1];
+      try {
+        val = JSON.parse(val);
+      } catch (e) {}
+      return { status: 'success', key: key, value: val };
+    }
+  }
+  return { status: 'error', message: 'Key config tidak ditemukan' };
+}
+
+function getConfigsMap(sheet) {
+  var map = {};
+  if (!sheet) return map;
+  try {
+    var rows = sheet.getDataRange().getValues();
+    for (var r = 1; r < rows.length; r++) {
+      var key = String(rows[r][0] || '').trim();
+      var val = rows[r][1];
+      if (key) {
+        try {
+          map[key] = JSON.parse(val);
+        } catch (e) {
+          map[key] = val;
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('Error getConfigsMap: ' + e);
+  }
+  return map;
 }

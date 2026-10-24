@@ -14,6 +14,7 @@ import { AuthModal } from './components/AuthModal';
 import { GasIntegrationModal } from './components/GasIntegrationModal';
 import { PrintReportModal } from './components/PrintReportModal';
 import { DeveloperContactModal } from './components/DeveloperContactModal';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { Flame } from 'lucide-react';
 
 export default function App() {
@@ -69,6 +70,7 @@ export default function App() {
     }
     const newState = apiService.getAppState();
     setAppState(newState);
+    setReportConfig(apiService.getReportConfig());
     setHasGasConfigured(Boolean(apiService.getGasUrl()));
     if (!selectedEventId && newState.event?.id_event) {
       setSelectedEventId(newState.event.id_event);
@@ -317,6 +319,9 @@ export default function App() {
           onUpdateReportConfig={handleUpdateReportConfig}
         />
       )}
+
+      {/* Floating PWA Install Badge for Android, iPhone & Desktop */}
+      <PWAInstallButton variant="floating" />
     </div>
   );
 }

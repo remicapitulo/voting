@@ -1,7 +1,7 @@
 {
   "id": "/",
   "name": "Duta Evoting - SMPIT Pondok Duta",
-  "short_name": "DutEv",
+  "short_name": "DutaEvoting",
   "description": "Sistem modern E-Voting dan Penilaian Dewan Juri SMPIT Pondok Duta.",
   "start_url": "/",
   "scope": "/",
@@ -11,16 +11,22 @@
   "theme_color": "#064e3b",
   "icons": [
     {
-      "src": "/assets/aistudio/Screenshot_20261024_153636_com.android.chrome_f025a967.jpg",
+      "src": "/pwa-192x192.png",
       "sizes": "192x192",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/assets/aistudio/Screenshot_20261024_153636_com.android.chrome_f025a967.jpg",
+      "src": "/pwa-512x512.png",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

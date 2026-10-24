@@ -19,8 +19,10 @@ import {
   BookOpen,
   Music,
   Megaphone,
+  Download,
   X
 } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -182,8 +184,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </nav>
 
-            {/* Zone 3: Desktop User Profile & Logout */}
+            {/* Zone 3: Desktop User Profile & Logout + PWA Install */}
             <div className="hidden md:flex items-center gap-3 shrink-0">
+              <PWAInstallButton variant="nav" />
+
               {currentUser ? (
                 <div className="flex items-center gap-3">
                   <div className="text-right">
@@ -217,8 +221,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* Zone 4: Mobile Top Quick Actions (Sheets for Admin Only & Quick Profile) */}
+            {/* Zone 4: Mobile Top Quick Actions (PWA Install, Sheets for Admin & Quick Profile) */}
             <div className="flex md:hidden items-center gap-2">
+              <PWAInstallButton variant="nav" className="px-2.5 py-1 text-[11px]" />
+
               {currentUser?.role === 'admin' && (
                 <button
                   onClick={onOpenGasModal}
@@ -405,7 +411,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {currentUser.role === 'admin' && (
-              <div className="py-2 border-y border-slate-100 mb-4 text-xs">
+              <div className="py-2 border-y border-slate-100 mb-3 text-xs">
                 <button
                   onClick={() => {
                     setShowMobileProfileSheet(false);
@@ -419,7 +425,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-2 mt-4">
+            {/* PWA Install Option in Profile Sheet */}
+            <div className="py-2 mb-3">
+              <PWAInstallButton variant="nav" className="w-full justify-center py-2.5 text-xs shadow-sm" />
+            </div>
+
+            <div className="flex items-center gap-2 mt-2">
               <button
                 onClick={() => setShowMobileProfileSheet(false)}
                 className="flex-1 py-2.5 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors text-center"

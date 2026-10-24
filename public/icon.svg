@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="110" fill="#064e3b" />
+  <circle cx="256" cy="256" r="215" fill="none" stroke="#fbbf24" stroke-width="12" stroke-dasharray="14 10" />
+  <!-- Flame -->
+  <path d="M256 95 C230 170 170 230 170 310 C170 380 210 420 256 420 C302 420 342 380 342 310 C342 230 282 170 256 95 Z" fill="#f59e0b" />
+  <path d="M256 180 C242 225 205 265 205 315 C205 358 230 385 256 385 C282 385 307 358 307 315 C307 265 270 225 256 180 Z" fill="#fbbf24" />
+  <path d="M256 250 C248 275 230 300 230 330 C230 354 242 370 256 370 C270 370 282 354 282 330 C282 300 264 275 256 250 Z" fill="#fef08a" />
+</svg>

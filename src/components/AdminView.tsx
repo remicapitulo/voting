@@ -58,8 +58,11 @@ import {
   FileText,
   LayoutGrid,
   Table,
-  Medal
+  Medal,
+  Cloud,
+  Loader2
 } from 'lucide-react';
+import { getFallbackCriteria, DRIVE_LOGO_FOLDER_ID } from '../services/apiService';
 import { getTeamInitials } from '../utils/initials';
 
 interface AdminViewProps {
@@ -193,6 +196,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [newQuestionText, setNewQuestionText] = useState('');
   const [editingQuestionIndex, setEditingQuestionIndex] = useState<number | null>(null);
   const [editingQuestionValue, setEditingQuestionValue] = useState('');
+  const [isSavingCriteria, setIsSavingCriteria] = useState(false);
+  const [isUploadingLogoKegiatan, setIsUploadingLogoKegiatan] = useState(false);
+  const [isUploadingLogoSekolah, setIsUploadingLogoSekolah] = useState(false);
+  const [isSavingReportConfig, setIsSavingReportConfig] = useState(false);
 
   // Feedback banner
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -520,51 +527,84 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   // Add a new question to the jury criteria
-  const handleAddQuestion = (e: React.FormEvent) => {
+  const handleAddQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newQuestionText.trim()) return;
+    if (!newQuestionText.trim() || isSavingCriteria) return;
 
+    setIsSavingCriteria(true);
     const currentCriteria = activeCategory?.kriteria || [];
     const updated = [...currentCriteria, newQuestionText.trim()];
-    const res = apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    setIsSavingCriteria(false);
     if (res.success) {
       setBannerMsg({ type: 'success', text: res.message });
       setNewQuestionText('');
       onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
+      setTimeout(() => setBannerMsg(null), 3500);
+    } else {
+      setBannerMsg({ type: 'error', text: res.message });
+      setTimeout(() => setBannerMsg(null), 3500);
     }
   };
 
   // Delete a question from jury criteria
-  const handleDeleteQuestion = (indexToDelete: number) => {
+  const handleDeleteQuestion = async (indexToDelete: number) => {
+    if (isSavingCriteria) return;
     const currentCriteria = activeCategory?.kriteria || [];
     if (currentCriteria.length <= 1) {
       setBannerMsg({ type: 'error', text: 'Kategori harus memiliki minimal 1 kriteria pertanyaan penilaian.' });
       setTimeout(() => setBannerMsg(null), 3000);
       return;
     }
+    setIsSavingCriteria(true);
     const updated = currentCriteria.filter((_, idx) => idx !== indexToDelete);
-    const res = apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    setIsSavingCriteria(false);
     if (res.success) {
-      setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil dihapus.' });
+      setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil dihapus dan diperbarui di Google Sheets.' });
       onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
+      setTimeout(() => setBannerMsg(null), 3500);
+    } else {
+      setBannerMsg({ type: 'error', text: res.message });
+      setTimeout(() => setBannerMsg(null), 3500);
     }
   };
 
   // Save edited question
-  const handleSaveEditQuestion = (indexToEdit: number) => {
-    if (!editingQuestionValue.trim()) return;
+  const handleSaveEditQuestion = async (indexToEdit: number) => {
+    if (!editingQuestionValue.trim() || isSavingCriteria) return;
+    setIsSavingCriteria(true);
     const currentCriteria = activeCategory?.kriteria || [];
     const updated = [...currentCriteria];
     updated[indexToEdit] = editingQuestionValue.trim();
-    const res = apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    setIsSavingCriteria(false);
     if (res.success) {
-      setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil diperbarui.' });
+      setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil diperbarui dan disinkronkan ke Google Sheets.' });
       setEditingQuestionIndex(null);
       setEditingQuestionValue('');
       onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
+      setTimeout(() => setBannerMsg(null), 3500);
+    } else {
+      setBannerMsg({ type: 'error', text: res.message });
+      setTimeout(() => setBannerMsg(null), 3500);
+    }
+  };
+
+  // Load default criteria if 0 or reset requested
+  const handleLoadDefaultCriteria = async () => {
+    if (isSavingCriteria) return;
+    setIsSavingCriteria(true);
+    const fallback = getFallbackCriteria(selectedCategoryId, activeCategory?.nama_kategori || '');
+    const res = await apiService.updateCategoryCriteria(selectedCategoryId, fallback);
+    setIsSavingCriteria(false);
+    if (res.success) {
+      setBannerMsg({ type: 'success', text: `Standar kriteria penilaian (${fallback.length} pertanyaan) berhasil dimuat & disimpan permanen ke Google Sheets!` });
+      onRefreshData();
+      setTimeout(() => setBannerMsg(null), 3500);
+    } else {
+      setBannerMsg({ type: 'error', text: res.message });
+      setTimeout(() => setBannerMsg(null), 3500);
     }
   };
 
@@ -611,14 +651,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   // Report Config Handlers (Kepala Sekolah, Ketua Panitia, Logo Kegiatan Kiri & Logo Sekolah Kanan)
-  const handleSaveReportConfig = () => {
-    apiService.saveReportConfig(reportConfig);
+  const handleSaveReportConfig = async () => {
+    setIsSavingReportConfig(true);
+    const res = await apiService.saveReportConfig(reportConfig);
+    setIsSavingReportConfig(false);
     onUpdateReportConfig?.(reportConfig);
-    setBannerMsg({ type: 'success', text: 'Pengaturan Lembar Rekap PDF (Logo & Penandatangan) berhasil disimpan.' });
+    setBannerMsg({ type: 'success', text: res.message });
     setTimeout(() => setBannerMsg(null), 3500);
   };
 
-  const handleResetReportConfig = () => {
+  const handleResetReportConfig = async () => {
     const defaultConfig: ReportConfig = {
       kepalaSekolah: {
         nama: "Drs. H. Ahmad Syafi'i, M.Pd",
@@ -637,43 +679,67 @@ export const AdminView: React.FC<AdminViewProps> = ({
       logoKegiatanType: 'pramuka'
     };
     setReportConfig(defaultConfig);
-    apiService.saveReportConfig(defaultConfig);
+    await apiService.saveReportConfig(defaultConfig);
     onUpdateReportConfig?.(defaultConfig);
-    setBannerMsg({ type: 'success', text: 'Pengaturan Lembar Rekap dikembalikan ke bawaan resmi SMPIT Pondok Duta.' });
+    setBannerMsg({ type: 'success', text: 'Pengaturan Lembar Rekap dikembalikan ke bawaan resmi SMPIT Pondok Duta & tersimpan di Google Sheets.' });
     setTimeout(() => setBannerMsg(null), 3000);
   };
 
-  const handleSelectPresetKegiatan = (type: string, svg: string) => {
+  const handleSelectPresetKegiatan = async (type: string, svg: string) => {
     const updated: ReportConfig = { ...reportConfig, logoKegiatan: svg, logoKegiatanType: type };
     setReportConfig(updated);
-    apiService.saveReportConfig(updated);
+    await apiService.saveReportConfig(updated);
     onUpdateReportConfig?.(updated);
-    setBannerMsg({ type: 'success', text: `Preset Logo Kegiatan (${type.toUpperCase()}) dipilih.` });
+    setBannerMsg({ type: 'success', text: `Preset Logo Kegiatan (${type.toUpperCase()}) dipilih & tersimpan di cloud.` });
     setTimeout(() => setBannerMsg(null), 2500);
   };
 
-  const handleSelectPresetSekolah = (type: string, svg: string) => {
+  const handleSelectPresetSekolah = async (type: string, svg: string) => {
     const updated: ReportConfig = { ...reportConfig, logoSekolah: svg, logoSekolahType: type };
     setReportConfig(updated);
-    apiService.saveReportConfig(updated);
+    await apiService.saveReportConfig(updated);
     onUpdateReportConfig?.(updated);
-    setBannerMsg({ type: 'success', text: `Preset Logo Sekolah (${type.toUpperCase()}) dipilih.` });
+    setBannerMsg({ type: 'success', text: `Preset Logo Sekolah (${type.toUpperCase()}) dipilih & tersimpan di cloud.` });
     setTimeout(() => setBannerMsg(null), 2500);
   };
 
   const handleUploadLogoKegiatan = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsUploadingLogoKegiatan(true);
+    setBannerMsg({ type: 'success', text: `Mengunggah Logo Kegiatan ke Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID})...` });
+
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
-        const updated: ReportConfig = { ...reportConfig, logoKegiatan: dataUrl, logoKegiatanType: 'custom' };
-        setReportConfig(updated);
-        apiService.saveReportConfig(updated);
-        onUpdateReportConfig?.(updated);
-        setBannerMsg({ type: 'success', text: 'Logo Kegiatan (Kiri Kop) berhasil diunggah.' });
-        setTimeout(() => setBannerMsg(null), 3000);
+        try {
+          const driveRes = await apiService.uploadLogoToDrive(dataUrl, `logo_kegiatan_${Date.now()}_${file.name}`, file.type || 'image/png');
+          const finalUrl = driveRes.success && driveRes.fileUrl ? driveRes.fileUrl : dataUrl;
+          const updated: ReportConfig = { ...reportConfig, logoKegiatan: finalUrl, logoKegiatanType: 'custom' };
+          setReportConfig(updated);
+          await apiService.saveReportConfig(updated);
+          onUpdateReportConfig?.(updated);
+
+          setBannerMsg({
+            type: 'success',
+            text: driveRes.success
+              ? `Alhamdulillah! Logo Kegiatan berhasil disimpan di Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID}) & Google Sheets.`
+              : 'Logo Kegiatan disimpan lokal (Upload Drive gagal atau belum terhubung).'
+          });
+        } catch (err: any) {
+          const updated: ReportConfig = { ...reportConfig, logoKegiatan: dataUrl, logoKegiatanType: 'custom' };
+          setReportConfig(updated);
+          apiService.saveReportConfig(updated);
+          onUpdateReportConfig?.(updated);
+          setBannerMsg({ type: 'error', text: `Gagal upload ke Drive (${err.message}), tersimpan secara lokal.` });
+        } finally {
+          setIsUploadingLogoKegiatan(false);
+          setTimeout(() => setBannerMsg(null), 4000);
+        }
+      } else {
+        setIsUploadingLogoKegiatan(false);
       }
     };
     reader.readAsDataURL(file);
@@ -682,16 +748,40 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const handleUploadLogoSekolah = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsUploadingLogoSekolah(true);
+    setBannerMsg({ type: 'success', text: `Mengunggah Logo Sekolah ke Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID})...` });
+
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUrl = event.target?.result as string;
       if (dataUrl) {
-        const updated: ReportConfig = { ...reportConfig, logoSekolah: dataUrl, logoSekolahType: 'custom' };
-        setReportConfig(updated);
-        apiService.saveReportConfig(updated);
-        onUpdateReportConfig?.(updated);
-        setBannerMsg({ type: 'success', text: 'Logo Sekolah (Kanan Kop) berhasil diunggah.' });
-        setTimeout(() => setBannerMsg(null), 3000);
+        try {
+          const driveRes = await apiService.uploadLogoToDrive(dataUrl, `logo_sekolah_${Date.now()}_${file.name}`, file.type || 'image/png');
+          const finalUrl = driveRes.success && driveRes.fileUrl ? driveRes.fileUrl : dataUrl;
+          const updated: ReportConfig = { ...reportConfig, logoSekolah: finalUrl, logoSekolahType: 'custom' };
+          setReportConfig(updated);
+          await apiService.saveReportConfig(updated);
+          onUpdateReportConfig?.(updated);
+
+          setBannerMsg({
+            type: 'success',
+            text: driveRes.success
+              ? `Alhamdulillah! Logo Sekolah berhasil disimpan di Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID}) & Google Sheets.`
+              : 'Logo Sekolah disimpan lokal (Upload Drive gagal atau belum terhubung).'
+          });
+        } catch (err: any) {
+          const updated: ReportConfig = { ...reportConfig, logoSekolah: dataUrl, logoSekolahType: 'custom' };
+          setReportConfig(updated);
+          apiService.saveReportConfig(updated);
+          onUpdateReportConfig?.(updated);
+          setBannerMsg({ type: 'error', text: `Gagal upload ke Drive (${err.message}), tersimpan secara lokal.` });
+        } finally {
+          setIsUploadingLogoSekolah(false);
+          setTimeout(() => setBannerMsg(null), 4000);
+        }
+      } else {
+        setIsUploadingLogoSekolah(false);
       }
     };
     reader.readAsDataURL(file);
@@ -1242,17 +1332,33 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </button>
                           </div>
 
-                          <div className="pt-1">
-                            <label className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors">
-                              <Upload className="w-3 h-3 text-emerald-800" />
-                              <span>Unggah File Logo Kegiatan (PNG/JPG)</span>
+                          <div className="pt-1 flex flex-col gap-1.5">
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors w-fit">
+                              {isUploadingLogoKegiatan ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                                  <span className="font-semibold text-emerald-800">Menyimpan ke Google Drive...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-3.5 h-3.5 text-emerald-800" />
+                                  <span>Unggah File Logo Kegiatan (PNG/JPG)</span>
+                                </>
+                              )}
                               <input
                                 type="file"
                                 accept="image/*"
+                                disabled={isUploadingLogoKegiatan}
                                 onChange={handleUploadLogoKegiatan}
                                 className="hidden"
                               />
                             </label>
+                            {(reportConfig.logoKegiatan.includes('google') || reportConfig.logoKegiatan.includes('lh3') || reportConfig.logoKegiatanType === 'custom') && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 font-medium">
+                                <Cloud className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>Tersimpan di Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>)</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1304,17 +1410,33 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </button>
                           </div>
 
-                          <div className="pt-1">
-                            <label className="inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors">
-                              <Upload className="w-3 h-3 text-emerald-800" />
-                              <span>Unggah File Logo Sekolah (PNG/JPG)</span>
+                          <div className="pt-1 flex flex-col gap-1.5">
+                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors w-fit">
+                              {isUploadingLogoSekolah ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                                  <span className="font-semibold text-emerald-800">Menyimpan ke Google Drive...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-3.5 h-3.5 text-emerald-800" />
+                                  <span>Unggah File Logo Sekolah (PNG/JPG)</span>
+                                </>
+                              )}
                               <input
                                 type="file"
                                 accept="image/*"
+                                disabled={isUploadingLogoSekolah}
                                 onChange={handleUploadLogoSekolah}
                                 className="hidden"
                               />
                             </label>
+                            {(reportConfig.logoSekolah.includes('google') || reportConfig.logoSekolah.includes('lh3') || reportConfig.logoSekolahType === 'custom') && (
+                              <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 font-medium">
+                                <Cloud className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>Tersimpan di Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>)</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1519,11 +1641,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      disabled={isSavingReportConfig}
                       onClick={handleSaveReportConfig}
-                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 active:scale-98 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                      className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 active:scale-98 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-60"
                     >
-                      <Check className="w-3.5 h-3.5 text-amber-300" />
-                      <span>Simpan Pengaturan Kop &amp; Tanda Tangan</span>
+                      {isSavingReportConfig ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Menyimpan ke Google Sheets...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Simpan Pengaturan Kop &amp; Tanda Tangan</span>
+                        </>
+                      )}
                     </button>
 
                     <button
@@ -2206,8 +2338,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <h3 className="text-base font-bold text-slate-900 mt-0.5">
                   Daftar Pertanyaan di Form Penilaian — {activeCategory.nama_kategori}
                 </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Admin dapat menambah, mengubah, atau menghapus kriteria pertanyaan penilaian skala 1-5 untuk dewan juri.
+                <p className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-2">
+                  <span>Admin dapat menambah, mengubah, atau menghapus kriteria pertanyaan penilaian skala 1-5 untuk dewan juri.</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    <Cloud className="w-3 h-3 text-emerald-600 shrink-0" />
+                    Tersimpan di Google Sheets Database
+                  </span>
                 </p>
               </div>
 
@@ -2231,81 +2367,133 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
             )}
 
-            <form onSubmit={handleAddQuestion} className="flex gap-2">
+            <form onSubmit={handleAddQuestion} className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
+                disabled={isSavingCriteria}
                 value={newQuestionText}
                 onChange={(e) => setNewQuestionText(e.target.value)}
                 placeholder="Tulis pertanyaan/kriteria penilaian baru..."
-                className="flex-1 px-3.5 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-700 bg-slate-50/50"
+                className="flex-1 px-3.5 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-700 bg-slate-50/50 disabled:opacity-60"
               />
-              <button
-                type="submit"
-                className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shrink-0 shadow-xs"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Pertanyaan</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={isSavingCriteria || !newQuestionText.trim()}
+                  className="px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 shrink-0 shadow-xs disabled:opacity-50 cursor-pointer"
+                >
+                  {isSavingCriteria ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan ke Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Pertanyaan</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingCriteria}
+                  onClick={handleLoadDefaultCriteria}
+                  title="Muat atau pulihkan standar kriteria penilaian resmi"
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3 h-3 text-slate-500" />
+                  <span>Muat Standar Resmi</span>
+                </button>
+              </div>
             </form>
 
-            <div className="space-y-2">
-              {activeCategory.kriteria.map((qText, idx) => (
-                <div
-                  key={idx}
-                  className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3"
+            {activeCategory.kriteria.length === 0 ? (
+              <div className="p-6 rounded-2xl bg-amber-50/70 border-2 border-dashed border-amber-300 text-center space-y-3">
+                <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto shadow-xs">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">0 Kriteria — Pertanyaan Penilaian Belum Tersedia</h4>
+                  <p className="text-xs text-slate-600 mt-1 max-w-md mx-auto">
+                    Cabang lomba ini belum memiliki pertanyaan di Google Sheets. Dewan juri tidak dapat melakukan penilaian jika kriteria kosong. Klik tombol di bawah untuk memuat standar kriteria resmi:
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSavingCriteria}
+                  onClick={handleLoadDefaultCriteria}
+                  className="px-5 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl inline-flex items-center gap-2 shadow-md cursor-pointer transition-all active:scale-98 disabled:opacity-50"
                 >
-                  <div className="flex items-center gap-2.5 flex-1">
-                    <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center justify-center font-mono shrink-0">
-                      {idx + 1}
-                    </span>
-                    {editingQuestionIndex === idx ? (
-                      <div className="flex-1 flex gap-2">
-                        <input
-                          type="text"
-                          value={editingQuestionValue}
-                          onChange={(e) => setEditingQuestionValue(e.target.value)}
-                          className="flex-1 px-2.5 py-1 text-xs border border-emerald-600 rounded bg-white"
-                        />
+                  {isSavingCriteria ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-amber-300" />}
+                  <span>Muat Standar Resmi ({getFallbackCriteria(selectedCategoryId, activeCategory.nama_kategori).length} Pertanyaan) &amp; Simpan ke Google Sheets</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {activeCategory.kriteria.map((qText, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3"
+                  >
+                    <div className="flex items-center gap-2.5 flex-1">
+                      <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center justify-center font-mono shrink-0">
+                        {idx + 1}
+                      </span>
+                      {editingQuestionIndex === idx ? (
+                        <div className="flex-1 flex gap-2">
+                          <input
+                            type="text"
+                            disabled={isSavingCriteria}
+                            value={editingQuestionValue}
+                            onChange={(e) => setEditingQuestionValue(e.target.value)}
+                            className="flex-1 px-2.5 py-1 text-xs border border-emerald-600 rounded bg-white"
+                          />
+                          <button
+                            disabled={isSavingCriteria}
+                            onClick={() => handleSaveEditQuestion(idx)}
+                            className="px-3 py-1 bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1"
+                          >
+                            {isSavingCriteria ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                            <span>Simpan</span>
+                          </button>
+                          <button
+                            disabled={isSavingCriteria}
+                            onClick={() => setEditingQuestionIndex(null)}
+                            className="px-2 py-1 bg-slate-200 text-slate-700 rounded text-xs"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-800 font-medium">{qText}</span>
+                      )}
+                    </div>
+
+                    {editingQuestionIndex !== idx && (
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => handleSaveEditQuestion(idx)}
-                          className="px-3 py-1 bg-emerald-800 text-white rounded text-xs font-bold"
+                          disabled={isSavingCriteria}
+                          onClick={() => {
+                            setEditingQuestionIndex(idx);
+                            setEditingQuestionValue(qText);
+                          }}
+                          className="px-2 py-1 text-[11px] text-slate-600 hover:text-slate-900 font-medium cursor-pointer"
                         >
-                          Simpan
+                          Edit
                         </button>
                         <button
-                          onClick={() => setEditingQuestionIndex(null)}
-                          className="px-2 py-1 bg-slate-200 text-slate-700 rounded text-xs"
+                          disabled={isSavingCriteria}
+                          onClick={() => handleDeleteQuestion(idx)}
+                          className="px-2 py-1 text-[11px] text-rose-600 hover:text-rose-800 font-medium cursor-pointer"
                         >
-                          Batal
+                          Hapus
                         </button>
                       </div>
-                    ) : (
-                      <span className="text-xs text-slate-800 font-medium">{qText}</span>
                     )}
                   </div>
-
-                  {editingQuestionIndex !== idx && (
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        onClick={() => {
-                          setEditingQuestionIndex(idx);
-                          setEditingQuestionValue(qText);
-                        }}
-                        className="px-2 py-1 text-[11px] text-slate-600 hover:text-slate-900 font-medium"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteQuestion(idx)}
-                        className="px-2 py-1 text-[11px] text-rose-600 hover:text-rose-800 font-medium"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Section 3: Penugasan Dewan Juri Khusus Cabang Lomba Ini */}
