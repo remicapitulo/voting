@@ -219,8 +219,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
     return Array.isArray(list) ? list.filter((l): l is UploadedLogo => Boolean(l && l.url && typeof l.url === 'string')) : [];
   });
   const [confirmDeleteLogoId, setConfirmDeleteLogoId] = useState<string | null>(null);
+  const [isScanningDrive, setIsScanningDrive] = useState(false);
 
-  // Pustaka Logo: Murni hanya menampilkan logo hasil unggahan dari Google Drive (tidak ada logo preset dummy)
+  // Sync uploadedLogosList whenever config changes or on mount
+  React.useEffect(() => {
+    const list = apiService.getUploadedLogos();
+    const valid = Array.isArray(list) ? list.filter((l): l is UploadedLogo => Boolean(l && l.url && typeof l.url === 'string')) : [];
+    setUploadedLogosList(valid);
+  }, [initialReportConfig, reportConfig]);
+
+  const handleScanDriveLogos = async () => {
+    setIsScanningDrive(true);
+    const res = await apiService.syncDriveLogos();
+    setUploadedLogosList(res.logos);
+    setBannerMsg({ type: res.success ? 'success' : 'error', text: res.message });
+    setIsScanningDrive(false);
+    onRefreshData();
+    setTimeout(() => setBannerMsg(null), 4000);
+  };
 
   // Feedback banner
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -249,6 +265,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
   const juryUsers = users.filter(u => u.role === 'juri');
   const currentVotesRequired = activeCategory?.votes_required || 1;
+
+  // Juri yang muncul di Matrix Penilaian HANYA juri yang sudah dipilih sesuai Cabang Lomba
+  const categoryAssignedJuryUsers = useMemo(() => {
+    const assigned = activeCategory?.assigned_juries;
+    if (!assigned || assigned.length === 0) {
+      // Jika belum ditentukan penugasan khusus, seluruh dewan juri tampil
+      return juryUsers;
+    }
+    const filtered = juryUsers.filter(jury =>
+      assigned.includes(jury.id) ||
+      assigned.includes(jury.username) ||
+      assigned.some(a => a.toLowerCase() === jury.id.toLowerCase() || a.toLowerCase() === jury.username.toLowerCase())
+    );
+    // Jika tidak ada yang cocok sama sekali (misal akun terhapus), fallback ke semua juri
+    return filtered.length > 0 ? filtered : juryUsers;
+  }, [juryUsers, activeCategory]);
 
   // Calculate current category recap
   const recapData = apiService.calculateRecap(selectedCategoryId, juryWeight, publicWeight);
@@ -1462,7 +1494,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         Pilih logo untuk <strong>Kiri Kop (Sekolah)</strong>, <strong>Kanan Kop (Kegiatan/Cabang Olahraga)</strong>, atau <strong>Header Website</strong>. Murni menggunakan berkas unggahan Anda di Google Drive.
                       </p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleScanDriveLogos}
+                        disabled={isScanningDrive}
+                        className="px-3.5 py-1.5 bg-white hover:bg-slate-100 active:scale-98 text-slate-800 border border-slate-300 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer disabled:opacity-60"
+                        title="Baca seluruh berkas logo langsung dari Google Drive Folder (Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7)"
+                      >
+                        <RotateCcw className={`w-3.5 h-3.5 text-emerald-800 ${isScanningDrive ? 'animate-spin' : ''}`} />
+                        <span>{isScanningDrive ? 'Memindai Drive...' : 'Pindai Google Drive'}</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => handleOpenUploadModal('kanan_kegiatan', 'Logo Cabang Olahraga')}
@@ -1486,27 +1529,43 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           Klik <strong>"Pilih Kiri"</strong> (Kop Sekolah), <strong>"Pilih Kanan"</strong> (Kop Kegiatan/Cabang Olahraga), atau <strong>"Pilih Header"</strong> (Logo Aplikasi di Header Website). Klik tombol yang aktif untuk melepas centang.
                         </p>
                       </div>
+
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <span>Folder ID: <span className="font-mono font-medium text-slate-700">{DRIVE_LOGO_FOLDER_ID}</span></span>
+                      </div>
                     </div>
 
                     {uploadedLogosList.length === 0 ? (
-                      <div className="p-8 text-center bg-white border-2 border-dashed border-slate-200 rounded-xl space-y-2.5">
+                      <div className="p-8 text-center bg-white border-2 border-dashed border-slate-200 rounded-xl space-y-3">
                         <div className="w-12 h-12 mx-auto rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center">
                           <Cloud className="w-6 h-6" />
                         </div>
                         <div className="text-xs font-bold text-slate-800">
-                          Belum Ada Logo Hasil Unggahan
+                          Pustaka Belum Menampilkan Logo
                         </div>
-                        <p className="text-[11px] text-slate-500 max-w-md mx-auto">
-                          Semua logo dummy telah dibersihkan. Silakan klik tombol <strong>"+ Unggah Logo Baru"</strong> di atas untuk mengunggah logo ke Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>).
+                        <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                          Jika Anda sudah pernah mengunggah logo ke Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>), klik tombol <strong>"Pindai Google Drive"</strong> di bawah untuk membaca langsung seluruh berkas gambar dari folder Google Drive Anda ke dalam daftar pustaka ini.
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenUploadModal('kanan_kegiatan', 'Logo Cabang Olahraga')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer mt-1"
-                        >
-                          <Plus className="w-3.5 h-3.5 text-amber-300" />
-                          <span>Unggah Logo Pertama</span>
-                        </button>
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleScanDriveLogos}
+                            disabled={isScanningDrive}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer disabled:opacity-60"
+                          >
+                            <RotateCcw className={`w-3.5 h-3.5 text-emerald-800 ${isScanningDrive ? 'animate-spin' : ''}`} />
+                            <span>{isScanningDrive ? 'Sedang Memindai...' : 'Pindai Google Drive Sekarang'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenUploadModal('kanan_kegiatan', 'Logo Cabang Olahraga')}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-800 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Unggah Logo Baru</span>
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -2204,12 +2263,41 @@ export const AdminView: React.FC<AdminViewProps> = ({
       {activeTab === 'tabulasi' && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-            <h3 className="text-sm font-bold text-slate-900 mb-1">
-              Matrix Penilaian Dewan Juri — {activeCategory.nama_kategori}
-            </h3>
-            <p className="text-xs text-slate-500">
-              Berikut rincian skor angka (skala 1 - 5) yang diberikan masing-masing Dewan Juri kepada setiap peserta.
-            </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 mb-1 flex flex-wrap items-center gap-2">
+                  <span>Matrix Penilaian Dewan Juri — {activeCategory.nama_kategori}</span>
+                  {activeCategory.assigned_juries && activeCategory.assigned_juries.length > 0 ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                      {categoryAssignedJuryUsers.length} Juri Ditugaskan
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                      Semua Juri ({juryUsers.length} Juri)
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Berikut rincian skor angka (skala 1 - 5) yang diberikan masing-masing Dewan Juri yang ditugaskan untuk cabang lomba <strong>{activeCategory.nama_kategori}</strong>.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingCategory({
+                    ...activeCategory,
+                    assessment_type: activeCategory.assessment_type || 'all',
+                    assigned_juries: activeCategory.assigned_juries || []
+                  });
+                }}
+                className="px-3.5 py-1.5 text-xs font-bold text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-2xs self-start sm:self-auto"
+                title="Pilih juri-juri yang ditugaskan menilai cabang lomba ini"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Pilih / Atur Juri Cabang Ini</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
@@ -2219,7 +2307,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <tr>
                     <th className="py-3 px-4">Nama Peserta / Regu</th>
                     <th className="py-3 px-4">Pangkalan / Kelas</th>
-                    {juryUsers.map(jury => (
+                    {categoryAssignedJuryUsers.map(jury => (
                       <th key={jury.id} className="py-3 px-4 text-center">
                         <div>{jury.nama}</div>
                         <span className="text-[10px] text-slate-400 font-normal">
@@ -2233,9 +2321,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {subEventTeams.map(team => {
+                    const validJuryIds = new Set<string>();
+                    categoryAssignedJuryUsers.forEach(j => {
+                      validJuryIds.add(j.id);
+                      validJuryIds.add(j.username);
+                    });
+
                     const teamScores = juryScores.filter(
-                      s => s.id_kategori === selectedCategoryId && s.id_team === team.id_team
+                      s => s.id_kategori === selectedCategoryId &&
+                           s.id_team === team.id_team &&
+                           (validJuryIds.has(s.id_jury) || validJuryIds.has(s.jury_name))
                     );
+
                     let avg1to5 = 0;
                     if (teamScores.length > 0) {
                       const sum = teamScores.reduce((acc, curr) => acc + curr.skor_1_to_5, 0);
@@ -2249,8 +2346,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           {team.nama_regu}
                         </td>
                         <td className="py-3 px-4 text-slate-600">{team.kelas_pangkalan}</td>
-                        {juryUsers.map(jury => {
-                          const jScore = teamScores.find(s => s.id_jury === jury.id);
+                        {categoryAssignedJuryUsers.map(jury => {
+                          const jScore = teamScores.find(s => s.id_jury === jury.id || s.id_jury === jury.username);
                           return (
                             <td key={jury.id} className="py-3 px-4 text-center font-mono tabular-nums">
                               {jScore ? (

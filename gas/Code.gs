@@ -377,6 +377,8 @@ function doGet(e) {
       response = { status: 'success', data: getAllDatabaseData() };
     } else if (action === 'setup') {
       response = setupDatabaseSheets();
+    } else if (action === 'getDriveLogos' || action === 'syncDriveLogos') {
+      response = { status: 'success', logos: syncAndGetDriveLogos() };
     } else {
       response = { status: 'error', message: 'Action GET tidak dikenali: ' + action };
     }
@@ -407,6 +409,10 @@ function doPost(e) {
       case 'getAllData':
         response = { status: 'success', data: getAllDatabaseData() };
         break;
+      case 'getDriveLogos':
+      case 'syncDriveLogos':
+        response = { status: 'success', logos: syncAndGetDriveLogos(body.folderId) };
+        break;
       case 'login':
         response = handleLogin(body.username, body.password);
         break;
@@ -418,6 +424,10 @@ function doPost(e) {
         break;
       case 'submitPublicVote':
         response = handleSubmitPublicVote(body);
+        break;
+      case 'removePublicVote':
+      case 'cancelPublicVote':
+        response = handleRemovePublicVote(body);
         break;
       case 'updateCategoryCriteria':
         response = handleUpdateCategoryCriteria(body);
@@ -468,6 +478,42 @@ function getAllDatabaseData() {
     ensureHeaderExists(teamSheet, 'motto');
     ensureHeaderExists(teamSheet, 'tipe_partisipasi');
   }
+
+  var configMap = getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'));
+
+  // Otomatis sinkronkan dan baca seluruh berkas gambar langsung dari Google Drive Folder
+  try {
+    var driveFiles = getLogosFromDriveFolder(DRIVE_FOLDER_ID);
+    if (driveFiles && driveFiles.length > 0) {
+      var existingUploaded = configMap.uploaded_logos || [];
+      if (!Array.isArray(existingUploaded)) existingUploaded = [];
+      var mergedMap = {};
+      for (var d = 0; d < driveFiles.length; d++) {
+        var df = driveFiles[d];
+        mergedMap[df.driveFileId] = df;
+      }
+      for (var ex = 0; ex < existingUploaded.length; ex++) {
+        var itm = existingUploaded[ex];
+        if (itm && (itm.driveFileId || itm.id)) {
+          var k = itm.driveFileId || itm.id;
+          if (mergedMap[k]) {
+            mergedMap[k] = Object.assign({}, mergedMap[k], itm);
+          } else if (itm.url) {
+            mergedMap[k] = itm;
+          }
+        }
+      }
+      var mergedList = [];
+      for (var mk in mergedMap) {
+        mergedList.push(mergedMap[mk]);
+      }
+      configMap.uploaded_logos = mergedList;
+      saveUploadedLogoListToConfig(mergedList);
+    }
+  } catch (driveErr) {
+    Logger.log('Drive folder scanning skipped in getAllDatabaseData: ' + driveErr);
+  }
+
   return {
     users: getSheetDataAsObjects(ss.getSheetByName(SHEETS.USERS)),
     events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),
@@ -475,7 +521,7 @@ function getAllDatabaseData() {
     teams: getSheetDataAsObjects(teamSheet),
     jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
     public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),
-    config: getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'))
+    config: configMap
   };
 }
 
@@ -686,30 +732,76 @@ function handleSubmitPublicVote(data) {
     sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
   }
 
-  var idVoter = String(data.id_voter || '');
-  var voterName = String(data.voter_name || '');
-  var idTeam = String(data.id_team || '');
-  var idKategori = String(data.id_kategori || '');
-  var ts = new Date().toISOString();
+  var idVote = String(data.id_vote || ('vote-' + new Date().getTime())).trim();
+  var idVoter = String(data.id_voter || '').trim();
+  var voterName = String(data.voter_name || '').trim();
+  var idTeam = String(data.id_team || '').trim();
+  var idKategori = String(data.id_kategori || '').trim();
+  var ts = String(data.timestamp || new Date().toISOString());
+
+  if (!idVoter || !idTeam || !idKategori) {
+    return { status: 'error', message: 'Data vote tidak lengkap (voter, regu, atau kategori kosong).' };
+  }
+
+  // Jika nama voter belum disertakan, cari nama asli di sheet Users
+  if (!voterName && idVoter) {
+    try {
+      var userSheet = ss.getSheetByName(SHEETS.USERS);
+      if (userSheet) {
+        var uRows = userSheet.getDataRange().getValues();
+        for (var u = 1; u < uRows.length; u++) {
+          if (String(uRows[u][0]).trim() === idVoter || String(uRows[u][1]).trim().toLowerCase() === idVoter.toLowerCase()) {
+            voterName = String(uRows[u][3] || uRows[u][1] || '').trim();
+            break;
+          }
+        }
+      }
+    } catch (uErr) {
+      Logger.log('Lookup user name error: ' + uErr);
+    }
+  }
 
   var votes = getSheetDataAsObjects(sheet);
   var userVotesInCat = 0;
   for (var r = 0; r < votes.length; r++) {
-    if (String(votes[r].id_voter) === idVoter && String(votes[r].id_kategori) === idKategori) {
-      if (String(votes[r].id_team) === idTeam) {
+    var vVoter = String(votes[r].id_voter || '').trim();
+    var vCat = String(votes[r].id_kategori || '').trim();
+    var vTeam = String(votes[r].id_team || '').trim();
+
+    if (vVoter === idVoter && vCat === idKategori) {
+      if (vTeam === idTeam) {
         return { status: 'error', message: 'Anda sudah memberikan suara untuk regu ini!' };
       }
       userVotesInCat++;
     }
   }
 
-  var maxQuota = data.votes_required ? parseInt(data.votes_required, 10) : 1;
+  // Tentukan batas kuota suara untuk kategori ini (prioritas: data request -> sheet Categories -> default 1)
+  var maxQuota = data.votes_required ? parseInt(data.votes_required, 10) : 0;
+  if (!maxQuota || maxQuota < 1) {
+    try {
+      var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
+      if (catSheet) {
+        var cRows = catSheet.getDataRange().getValues();
+        for (var c = 1; c < cRows.length; c++) {
+          if (String(cRows[c][0]).trim().toLowerCase() === idKategori.toLowerCase()) {
+            maxQuota = parseInt(cRows[c][6] || 1, 10);
+            break;
+          }
+        }
+      }
+    } catch (cErr) {
+      Logger.log('Lookup category quota error: ' + cErr);
+    }
+  }
+  if (!maxQuota || maxQuota < 1) maxQuota = 1;
+
   if (userVotesInCat >= maxQuota) {
     return { status: 'error', message: 'Hak suara Anda (' + maxQuota + ' suara) untuk kategori ini sudah terpenuhi.' };
   }
 
   appendRowByHeaders(sheet, {
-    id_vote: 'vote-' + new Date().getTime(),
+    id_vote: idVote,
     id_voter: idVoter,
     voter_name: voterName,
     id_team: idTeam,
@@ -717,7 +809,35 @@ function handleSubmitPublicVote(data) {
     timestamp: ts
   });
 
-  return { status: 'success', message: 'Vote berhasil disimpan!' };
+  return { status: 'success', message: 'Vote berhasil disimpan ke database Google Sheets!', id_vote: idVote };
+}
+
+function handleRemovePublicVote(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+  if (!sheet) return { status: 'error', message: 'Sheet Public_Votes belum tersedia' };
+
+  var idVote = String(data.id_vote || '').trim();
+  var idVoter = String(data.id_voter || '').trim();
+  var idTeam = String(data.id_team || '').trim();
+  var idKategori = String(data.id_kategori || '').trim();
+
+  var rows = sheet.getDataRange().getValues();
+  for (var r = rows.length - 1; r >= 1; r--) {
+    var rowVoteId = String(rows[r][0] || '').trim();
+    var rowVoter = String(rows[r][1] || '').trim();
+    var rowTeam = String(rows[r][3] || '').trim();
+    var rowCat = String(rows[r][4] || '').trim();
+
+    var matchVoteId = idVote && (rowVoteId === idVote);
+    var matchComposite = idVoter && idTeam && idKategori && (rowVoter === idVoter && rowTeam === idTeam && rowCat === idKategori);
+
+    if (matchVoteId || matchComposite) {
+      sheet.deleteRow(r + 1);
+      return { status: 'success', message: 'Suara berhasil dibatalkan dari database Google Sheets.' };
+    }
+  }
+  return { status: 'error', message: 'Data suara tidak ditemukan di database Google Sheets.' };
 }
 
 function handleManageCategory(data) {
@@ -1345,6 +1465,131 @@ function handleUploadLogoToDrive(data) {
     };
   } catch (err) {
     return { status: 'error', message: 'Gagal mengunggah logo ke Google Drive: ' + err.toString() };
+  }
+}
+
+/**
+ * Membaca seluruh file gambar langsung dari Google Drive Folder
+ * Folder Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7 (Logo dan Laporan)
+ */
+function getLogosFromDriveFolder(folderId) {
+  var targetId = String(folderId || DRIVE_FOLDER_ID).trim();
+  if (!targetId) targetId = DRIVE_FOLDER_ID;
+  var logos = [];
+  try {
+    var folder = DriveApp.getFolderById(targetId);
+    if (!folder) return logos;
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var file = files.next();
+      var name = file.getName();
+      if (name === 'auth_test.txt') continue;
+      var mime = String(file.getMimeType() || '').toLowerCase();
+      // Filter tipe gambar
+      if (mime.indexOf('image/') === 0 || /\.(png|jpe?g|svg|webp|gif|bmp)$/i.test(name)) {
+        var fileId = file.getId();
+        try {
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {}
+        var cleanTitle = name.replace(/\.[^/.]+$/, "");
+        logos.push({
+          id: 'logo_' + fileId,
+          name: cleanTitle,
+          url: 'https://lh3.googleusercontent.com/d/' + fileId,
+          driveFileId: fileId,
+          fileName: name,
+          folderId: folder.getId(),
+          folderName: folder.getName(),
+          type: 'olahraga',
+          created_at: file.getDateCreated() ? file.getDateCreated().toISOString() : new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    Logger.log('getLogosFromDriveFolder error: ' + err);
+  }
+  return logos;
+}
+
+/**
+ * Sinkronisasi berkas Google Drive Folder dengan metadata di Config Sheet
+ */
+function syncAndGetDriveLogos(folderId) {
+  var driveLogos = getLogosFromDriveFolder(folderId);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  var existingList = [];
+  if (sheet) {
+    var rows = sheet.getDataRange().getValues();
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        try {
+          existingList = JSON.parse(rows[r][1]);
+          if (!Array.isArray(existingList)) existingList = [];
+        } catch (e) {
+          existingList = [];
+        }
+        break;
+      }
+    }
+  }
+
+  var mergedMap = {};
+  for (var d = 0; d < driveLogos.length; d++) {
+    var dl = driveLogos[d];
+    mergedMap[dl.driveFileId] = dl;
+  }
+  for (var ex = 0; ex < existingList.length; ex++) {
+    var itm = existingList[ex];
+    if (itm && (itm.driveFileId || itm.id)) {
+      var k = itm.driveFileId || itm.id;
+      if (mergedMap[k]) {
+        mergedMap[k] = Object.assign({}, mergedMap[k], itm);
+      } else if (itm.url) {
+        mergedMap[k] = itm;
+      }
+    }
+  }
+
+  var finalList = [];
+  for (var mk in mergedMap) {
+    finalList.push(mergedMap[mk]);
+  }
+
+  if (finalList.length > 0) {
+    saveUploadedLogoListToConfig(finalList);
+  }
+
+  return finalList;
+}
+
+function saveUploadedLogoListToConfig(list) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+      sheet.appendRow(['key', 'value', 'updated_at']);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+    }
+    var rows = sheet.getDataRange().getValues();
+    var rowIndex = -1;
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        rowIndex = r + 1;
+        break;
+      }
+    }
+    var valStr = JSON.stringify(list);
+    var ts = new Date().toISOString();
+    if (rowIndex > -1) {
+      sheet.getRange(rowIndex, 2).setValue(valStr);
+      sheet.getRange(rowIndex, 3).setValue(ts);
+    } else {
+      sheet.appendRow(['uploaded_logos', valStr, ts]);
+    }
+  } catch (err) {
+    Logger.log('Gagal menyimpan uploaded_logos: ' + err);
   }
 }
 

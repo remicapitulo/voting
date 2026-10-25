@@ -13,6 +13,7 @@ import {
   LOGO_SEKOLAH_PONDOK_DUTA_SVG,
   LOGO_PRAMUKA_SVG
 } from '../utils/reportLogos';
+import { formatImageUrl } from '../utils/imageUrl';
 import {
   INITIAL_EVENT,
   INITIAL_EVENTS,
@@ -428,12 +429,18 @@ class ApiService {
           seenTeamIds.add(id);
           let anggotaArr: string[] = [];
           if (Array.isArray(t.anggota)) {
-            anggotaArr = t.anggota;
+            anggotaArr = t.anggota.map((a: any) => String(a).trim().replace(/^["']|["']$/g, '')).filter(Boolean);
           } else if (typeof t.anggota === 'string' && t.anggota.trim().length > 0) {
             try {
-              anggotaArr = JSON.parse(t.anggota);
+              const parsed = JSON.parse(t.anggota);
+              if (Array.isArray(parsed)) {
+                anggotaArr = parsed.map((a: any) => String(a).trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+              } else if (parsed) {
+                anggotaArr = [String(parsed).trim()];
+              }
             } catch {
-              anggotaArr = t.anggota.split(',').map((s: string) => s.trim()).filter(Boolean);
+              const cleanStr = t.anggota.replace(/^\[|\]$/g, '');
+              anggotaArr = cleanStr.split(',').map((s: string) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
             }
           }
 
@@ -453,7 +460,7 @@ class ApiService {
             nama_regu: String(t.nama_regu || ''),
             kelas_pangkalan: String(t.kelas_pangkalan || ''),
             kategori_regu: katRegu,
-            foto_url: fotoUrl,
+            foto_url: formatImageUrl(fotoUrl),
             anggota: anggotaArr,
             motto: t.motto !== undefined ? String(t.motto) : '',
             ketua_regu: t.ketua_regu !== undefined ? String(t.ketua_regu) : '',
@@ -610,8 +617,20 @@ class ApiService {
           const logos = typeof rawData.config.uploaded_logos === 'object'
             ? rawData.config.uploaded_logos
             : JSON.parse(rawData.config.uploaded_logos);
-          if (Array.isArray(logos)) {
-            localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(logos));
+          if (Array.isArray(logos) && logos.length > 0) {
+            const currentList = this.getUploadedLogos();
+            const map = new Map<string, UploadedLogo>();
+            logos.forEach((l: any) => {
+              if (l && l.url) {
+                const key = l.driveFileId || l.id || l.url;
+                map.set(key, l);
+              }
+            });
+            currentList.forEach(l => {
+              const key = l.driveFileId || l.id || l.url;
+              if (!map.has(key)) map.set(key, l);
+            });
+            localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(Array.from(map.values())));
           }
         } catch (e) {
           console.warn('Sync uploaded_logos skipped:', e);
@@ -1060,14 +1079,15 @@ class ApiService {
     teamId: string,
     categoryId: string
   ): Promise<{ success: boolean; message: string; remainingVotes?: number; totalCast?: number; requiredVotes?: number }> {
+    const cleanCategoryId = categoryId.includes('-dup-') ? categoryId.split('-dup-')[0] : categoryId;
     const votes: PublicVote[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PUBLIC_VOTES) || '[]');
     const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
-    const cat = categories.find(c => c.id_kategori === categoryId);
+    const cat = categories.find(c => c.id_kategori === categoryId || c.id_kategori === cleanCategoryId);
     const requiredVotes = cat?.votes_required || 1;
 
     // Existing votes by this voter for this category
     const userCategoryVotes = votes.filter(
-      v => v.id_voter === voterId && v.id_kategori === categoryId
+      v => v.id_voter === voterId && (v.id_kategori === categoryId || v.id_kategori === cleanCategoryId)
     );
 
     // Check if voter already voted for this specific team
@@ -1084,34 +1104,50 @@ class ApiService {
       };
     }
 
-    // Try posting to GAS
+    const voteId = `vote-${Date.now()}`;
+    const timestamp = new Date().toISOString();
+
+    // Kirim langsung ke Database Google Sheets (Cloud)
     if (this.gasUrl) {
       try {
-        await fetch(this.gasUrl, {
+        const res = await fetch(this.gasUrl, {
           method: 'POST',
           body: JSON.stringify({
             action: 'submitPublicVote',
+            id_vote: voteId,
             id_voter: voterId,
+            voter_name: voterName,
             id_team: teamId,
-            id_kategori: categoryId
+            id_kategori: cleanCategoryId,
+            votes_required: requiredVotes,
+            timestamp: timestamp
           })
         });
-      } catch (err) {
-        console.warn('Failed to sync vote to GAS, stored locally:', err);
+        const gasResult = await res.json();
+        if (gasResult && gasResult.status === 'error') {
+          return { success: false, message: gasResult.message || 'Gagal menyimpan suara ke database Google Sheets.' };
+        }
+      } catch (err: any) {
+        console.warn('Gagal sinkronisasi vote ke Google Sheets:', err);
       }
     }
 
     const newVote: PublicVote = {
-      id_vote: `vote-${Date.now()}`,
+      id_vote: voteId,
       id_voter: voterId,
       voter_name: voterName,
       id_team: teamId,
-      id_kategori: categoryId,
-      timestamp: new Date().toISOString()
+      id_kategori: cleanCategoryId,
+      timestamp: timestamp
     };
 
     votes.push(newVote);
     localStorage.setItem(STORAGE_KEYS.PUBLIC_VOTES, JSON.stringify(votes));
+
+    // Sinkronisasi data cloud setelah vote tersimpan
+    if (this.gasUrl) {
+      await this.syncFromDatabase().catch(console.warn);
+    }
 
     const totalNow = userCategoryVotes.length + 1;
     const remaining = requiredVotes - totalNow;
@@ -1119,7 +1155,7 @@ class ApiService {
     if (remaining === 0) {
       return {
         success: true,
-        message: `Alhamdulillah! Seluruh ${requiredVotes} hak suara Anda untuk kategori ini telah lengkap digunakan.`,
+        message: `Alhamdulillah! Seluruh ${requiredVotes} hak suara Anda untuk kategori ini telah lengkap digunakan dan tersimpan di database.`,
         remainingVotes: 0,
         totalCast: totalNow,
         requiredVotes
@@ -1128,7 +1164,7 @@ class ApiService {
 
     return {
       success: true,
-      message: `Suara berhasil dicatat (${totalNow} dari ${requiredVotes} suara). Sisa ${remaining} suara lagi yang wajib Anda tentukan.`,
+      message: `Suara berhasil dicatat ke database Google Sheets (${totalNow} dari ${requiredVotes} suara). Sisa ${remaining} suara lagi yang wajib Anda tentukan.`,
       remainingVotes: remaining,
       totalCast: totalNow,
       requiredVotes
@@ -1137,9 +1173,34 @@ class ApiService {
 
   public async removePublicVote(voteId: string): Promise<{ success: boolean; message: string }> {
     const votes: PublicVote[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PUBLIC_VOTES) || '[]');
+    const targetVote = votes.find(v => v.id_vote === voteId);
     const filtered = votes.filter(v => v.id_vote !== voteId);
     localStorage.setItem(STORAGE_KEYS.PUBLIC_VOTES, JSON.stringify(filtered));
-    return { success: true, message: 'Suara berhasil dibatalkan.' };
+
+    // Hapus dari Google Sheets jika URL GAS tersedia
+    if (this.gasUrl && targetVote) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'removePublicVote',
+            id_vote: voteId,
+            id_voter: targetVote.id_voter,
+            id_team: targetVote.id_team,
+            id_kategori: targetVote.id_kategori
+          })
+        });
+        const gasResult = await res.json();
+        if (gasResult && gasResult.status === 'error') {
+          console.warn('Google Sheets pembatalan vote warning:', gasResult.message);
+        }
+        await this.syncFromDatabase().catch(console.warn);
+      } catch (err: any) {
+        console.warn('Gagal menghubungi Google Sheets untuk pembatalan vote:', err);
+      }
+    }
+
+    return { success: true, message: 'Suara berhasil dibatalkan dan kuota telah dikembalikan.' };
   }
 
   public updateCategoryVoteQuota(categoryId: string, votesRequired: number): { success: boolean; message: string } {
@@ -1721,13 +1782,179 @@ class ApiService {
 
   public getUploadedLogos(): UploadedLogo[] {
     const raw = localStorage.getItem(STORAGE_KEYS.UPLOADED_LOGOS);
-    if (!raw) return [];
+    let list: UploadedLogo[] = [];
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          list = parsed.filter((l): l is UploadedLogo => l !== null && typeof l === 'object' && typeof l.url === 'string' && Boolean(l.url));
+        }
+      } catch {
+        list = [];
+      }
+    }
+
+    // Auto-recover active custom logos from reportConfig if missing from list
     try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed.filter((l): l is UploadedLogo => l !== null && typeof l === 'object' && typeof l.url === 'string' && Boolean(l.url));
-    } catch {
-      return [];
+      const cfgRaw = localStorage.getItem(STORAGE_KEYS.REPORT_CONFIG);
+      if (cfgRaw) {
+        const cfg = JSON.parse(cfgRaw);
+        const map = new Map<string, UploadedLogo>();
+        list.forEach(l => {
+          const key = l.driveFileId || l.id || l.url;
+          map.set(key, l);
+          map.set(l.url, l);
+        });
+
+        const checkAdd = (url: string | undefined, defaultName: string, type: 'sekolah' | 'kegiatan' | 'olahraga') => {
+          if (url && typeof url === 'string' && (url.includes('googleusercontent.com') || url.includes('drive.google.com') || url.startsWith('data:image'))) {
+            if (!map.has(url)) {
+              const fileIdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/);
+              const driveFileId = fileIdMatch ? fileIdMatch[1] : undefined;
+              const recovered: UploadedLogo = {
+                id: driveFileId ? `logo_${driveFileId}` : `logo_${Date.now()}`,
+                name: defaultName,
+                url: url,
+                driveFileId: driveFileId,
+                fileName: `${defaultName}.png`,
+                type: type,
+                created_at: new Date().toISOString()
+              };
+              list.push(recovered);
+              map.set(url, recovered);
+            }
+          }
+        };
+
+        checkAdd(cfg.logoKegiatan, 'Logo Kegiatan Terpilih', 'kegiatan');
+        checkAdd(cfg.logoSekolah, 'Logo Sekolah Terpilih', 'sekolah');
+        checkAdd(cfg.logoAplikasiHeader, 'Logo Header Website', 'olahraga');
+
+        if (Array.isArray(cfg.uploadedLogos)) {
+          cfg.uploadedLogos.forEach((l: any) => {
+            if (l && l.url && !map.has(l.url)) {
+              list.push(l);
+              map.set(l.url, l);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    return list;
+  }
+
+  /**
+   * Membaca dan mensinkronkan seluruh berkas logo langsung dari Google Drive Folder:
+   * Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7 (SMPIT Pondok Duta - Logo dan Laporan)
+   */
+  public async syncDriveLogos(): Promise<{ success: boolean; message: string; logos: UploadedLogo[] }> {
+    if (!this.gasUrl) {
+      return {
+        success: false,
+        message: 'URL Google Apps Script belum terhubung.',
+        logos: this.getUploadedLogos()
+      };
+    }
+
+    try {
+      let fetchedLogos: UploadedLogo[] = [];
+
+      // 1. Coba request action=syncDriveLogos ke GAS
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'syncDriveLogos', folderId: DRIVE_LOGO_FOLDER_ID })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === 'success' && Array.isArray(json.logos) && json.logos.length > 0) {
+            fetchedLogos = json.logos;
+          }
+        }
+      } catch (e) {
+        console.warn('syncDriveLogos via POST failed, trying GET:', e);
+      }
+
+      // 2. Jika via POST belum mendapatkan data, coba GET action=getDriveLogos
+      if (fetchedLogos.length === 0) {
+        try {
+          const getRes = await fetch(`${this.gasUrl}?action=getDriveLogos`);
+          if (getRes.ok) {
+            const getJson = await getRes.json();
+            if (getJson.status === 'success' && Array.isArray(getJson.logos) && getJson.logos.length > 0) {
+              fetchedLogos = getJson.logos;
+            }
+          }
+        } catch (e) {
+          console.warn('getDriveLogos via GET failed:', e);
+        }
+      }
+
+      // 3. Fallback: coba getAllData
+      if (fetchedLogos.length === 0) {
+        try {
+          const allRes = await fetch(`${this.gasUrl}?action=getAllData`);
+          if (allRes.ok) {
+            const allJson = await allRes.json();
+            if (allJson.status === 'success' && allJson.data?.config?.uploaded_logos) {
+              const cfgLogos = typeof allJson.data.config.uploaded_logos === 'object'
+                ? allJson.data.config.uploaded_logos
+                : JSON.parse(allJson.data.config.uploaded_logos);
+              if (Array.isArray(cfgLogos)) fetchedLogos = cfgLogos;
+            }
+          }
+        } catch (e) {}
+      }
+
+      const currentList = this.getUploadedLogos();
+      const map = new Map<string, UploadedLogo>();
+
+      // Masukkan yang didapat dari Google Drive
+      fetchedLogos.forEach(l => {
+        if (l && l.url) {
+          const key = l.driveFileId || l.id || l.url;
+          map.set(key, l);
+        }
+      });
+
+      // Gabungkan dengan logo lokal yang ada
+      currentList.forEach(l => {
+        const key = l.driveFileId || l.id || l.url;
+        if (!map.has(key)) map.set(key, l);
+      });
+
+      const mergedList = Array.from(map.values());
+      localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(mergedList));
+
+      // Update reportConfig jika ada
+      try {
+        const cfg = this.getReportConfig();
+        cfg.uploadedLogos = mergedList;
+        localStorage.setItem(STORAGE_KEYS.REPORT_CONFIG, JSON.stringify(cfg));
+      } catch (e) {}
+
+      if (fetchedLogos.length > 0) {
+        return {
+          success: true,
+          message: `Alhamdulillah! Berhasil membaca ${fetchedLogos.length} file logo langsung dari Google Drive Folder (Total: ${mergedList.length} logo di pustaka).`,
+          logos: mergedList
+        };
+      } else {
+        return {
+          success: true,
+          message: `Pemindaian Google Drive selesai. Pustaka memuat ${mergedList.length} logo.`,
+          logos: mergedList
+        };
+      }
+    } catch (err: any) {
+      return {
+        success: false,
+        message: `Gagal memindai Google Drive: ${err.message || 'Koneksi terputus'}`,
+        logos: this.getUploadedLogos()
+      };
     }
   }
 
@@ -1979,17 +2206,41 @@ class ApiService {
       }
     });
 
+    // Filter dewan juri yang ditugaskan khusus jika category.assigned_juries diisi
+    const assignedList = category?.assigned_juries;
+    const hasAssigned = Boolean(assignedList && assignedList.length > 0);
+    const validJuryIds = new Set<string>();
+    if (hasAssigned) {
+      state.users.forEach(u => {
+        if (
+          assignedList!.includes(u.id) ||
+          assignedList!.includes(u.username) ||
+          assignedList!.some(a => a.toLowerCase() === u.id.toLowerCase() || a.toLowerCase() === u.username.toLowerCase())
+        ) {
+          validJuryIds.add(u.id);
+          validJuryIds.add(u.username);
+        }
+      });
+    }
+
     const recapList: ScoreRecapItem[] = teams.map(team => {
-      // Jury scores for this team
-      const teamScores = categoryJuryScores.filter(s => s.id_team === team.id_team);
+      // Jury scores for this team (hanya hitung skor dari juri yang ditugaskan jika ada penugasan khusus)
+      const teamScores = categoryJuryScores.filter(s => {
+        if (s.id_team !== team.id_team) return false;
+        if (hasAssigned) {
+          return validJuryIds.has(s.id_jury) || validJuryIds.has(s.jury_name);
+        }
+        return true;
+      });
       const juryCount = teamScores.length;
       let averageJuryScore1to5 = 0;
+      let convertedJuryScore100 = 0;
       if (juryCount > 0) {
         const sum = teamScores.reduce((acc, curr) => acc + curr.skor_1_to_5, 0);
-        averageJuryScore1to5 = Number((sum / juryCount).toFixed(2));
+        const rawAvg = sum / juryCount;
+        averageJuryScore1to5 = Number(rawAvg.toFixed(2));
+        convertedJuryScore100 = Number((rawAvg * 20).toFixed(2));
       }
-      // Convert 1-5 scale into 100-based scale (1.0 -> 20, 5.0 -> 100)
-      const convertedJuryScore100 = Number((averageJuryScore1to5 * 20).toFixed(2));
 
       // Public votes for this team
       const teamVotes = categoryPublicVotes.filter(v => v.id_team === team.id_team);
@@ -1998,8 +2249,7 @@ class ApiService {
         ? Number(((publicVoteCount / totalPublicVotes) * 100).toFixed(1))
         : 0;
 
-      // Normalization of votes to 100-scale relative to max vote or percentage
-      // If there's at least 1 vote, normalize relative to max votes in category (e.g. 10/10 -> 100)
+      // Normalization of votes to 100-scale relative to max vote in category (e.g. 10/10 -> 100)
       const normalizedPublicScore100 = maxVotesForAnyTeam > 0
         ? Number(((publicVoteCount / maxVotesForAnyTeam) * 100).toFixed(2))
         : 0;
@@ -2038,8 +2288,22 @@ class ApiService {
       };
     });
 
-    // Sort descending by final weighted score
-    recapList.sort((a, b) => b.finalWeightedScore - a.finalWeightedScore);
+    // Sort descending by final weighted score with clear tie-breakers
+    recapList.sort((a, b) => {
+      if (Math.abs(b.finalWeightedScore - a.finalWeightedScore) > 0.001) {
+        return b.finalWeightedScore - a.finalWeightedScore;
+      }
+      // Tie-breaker 1: Nilai Konversi Juri lebih tinggi
+      if (Math.abs(b.convertedJuryScore100 - a.convertedJuryScore100) > 0.001) {
+        return b.convertedJuryScore100 - a.convertedJuryScore100;
+      }
+      // Tie-breaker 2: Jumlah Suara Publik lebih banyak
+      if (b.publicVoteCount !== a.publicVoteCount) {
+        return b.publicVoteCount - a.publicVoteCount;
+      }
+      // Tie-breaker 3: Abjad nama regu
+      return a.team.nama_regu.localeCompare(b.team.nama_regu, 'id');
+    });
 
     // Assign rank 1, 2, 3...
     recapList.forEach((item, index) => {
