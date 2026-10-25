@@ -413,8 +413,9 @@ class ApiService {
             kategori_regu: katRegu,
             foto_url: fotoUrl,
             anggota: anggotaArr,
-            motto: t.motto || '',
-            ketua_regu: t.ketua_regu || '',
+            motto: t.motto !== undefined ? String(t.motto) : '',
+            ketua_regu: t.ketua_regu !== undefined ? String(t.ketua_regu) : '',
+            tipe_partisipasi: (t.tipe_partisipasi === 'Individu' || t.tipe_partisipasi === 'Group') ? t.tipe_partisipasi : 'Group',
             color_theme: t.color_theme || 'emerald'
           });
         }
@@ -1263,7 +1264,21 @@ class ApiService {
     if (this.gasUrl) {
       fetch(this.gasUrl, {
         method: 'POST',
-        body: JSON.stringify({ action: 'manageTeam', operation: 'create', ...team })
+        body: JSON.stringify({
+          action: 'manageTeam',
+          operation: 'create',
+          id_team: team.id_team,
+          id_event: team.id_event,
+          nama_regu: team.nama_regu,
+          kelas_pangkalan: team.kelas_pangkalan,
+          kategori_regu: team.kategori_regu,
+          foto_url: team.foto_url || '',
+          anggota: team.anggota || [],
+          ketua_regu: team.ketua_regu || '',
+          motto: team.motto || '',
+          tipe_partisipasi: team.tipe_partisipasi || 'Group',
+          color_theme: team.color_theme || 'emerald'
+        })
       }).catch(console.warn);
     }
 
@@ -1279,7 +1294,21 @@ class ApiService {
       if (this.gasUrl) {
         fetch(this.gasUrl, {
           method: 'POST',
-          body: JSON.stringify({ action: 'manageTeam', operation: 'update', ...updatedTeam })
+          body: JSON.stringify({
+            action: 'manageTeam',
+            operation: 'update',
+            id_team: updatedTeam.id_team,
+            id_event: updatedTeam.id_event,
+            nama_regu: updatedTeam.nama_regu,
+            kelas_pangkalan: updatedTeam.kelas_pangkalan,
+            kategori_regu: updatedTeam.kategori_regu,
+            foto_url: updatedTeam.foto_url || '',
+            anggota: updatedTeam.anggota || [],
+            ketua_regu: updatedTeam.ketua_regu || '',
+            motto: updatedTeam.motto || '',
+            tipe_partisipasi: updatedTeam.tipe_partisipasi || 'Group',
+            color_theme: updatedTeam.color_theme || 'emerald'
+          })
         }).catch(console.warn);
       }
       return { success: true, message: `Data peserta "${updatedTeam.nama_regu}" berhasil diperbarui.` };

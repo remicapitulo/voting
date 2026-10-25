@@ -1023,7 +1023,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 self-start sm:self-auto shadow-xs"
             >
               <Plus className="w-4 h-4" />
-              <span>Tambah Sub-Event Baru</span>
+              <span>Tambah Event</span>
             </button>
           </div>
 
@@ -2952,141 +2952,206 @@ export const AdminView: React.FC<AdminViewProps> = ({
       {/* ========================================================================= */}
       {/* MODAL EDIT PESERTA (BARU) */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* MODAL EDIT PESERTA (BARU - RESPONSIVE & PROFESSIONAL) */}
+      {/* ========================================================================= */}
       {editingTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Edit Data Peserta</h3>
-                <p className="text-xs text-slate-500">ID: {editingTeam.id_team}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-800/80 border border-emerald-700/60 flex items-center justify-center text-amber-300 shadow-xs">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white leading-tight">Edit Data Peserta</h3>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    ID: <span className="font-mono text-amber-300 font-semibold">{editingTeam.id_team}</span> · Perbarui informasi peserta &amp; pangkalan
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingTeam(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+                title="Tutup Form"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleUpdateTeam} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Sub-Event *</label>
-                <select
-                  value={editingTeam.id_event}
-                  onChange={(e) => setEditingTeam({ ...editingTeam, id_event: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300 bg-white"
-                >
-                  {availableEvents.map(ev => (
-                    <option key={ev.id_event} value={ev.id_event}>
-                      {ev.kode_event || ev.nama_event}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Modal Body Form */}
+            <form onSubmit={handleUpdateTeam} className="p-5 sm:p-6 space-y-4 text-xs">
+              {/* Grid 2 Kolom untuk Sub-Event & Format Partisipasi */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1. Sub-Event */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Sub-Event Terkait *</span>
+                  </label>
+                  <select
+                    value={editingTeam.id_event}
+                    onChange={(e) => setEditingTeam({ ...editingTeam, id_event: e.target.value })}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  >
+                    {availableEvents.map(ev => (
+                      <option key={ev.id_event} value={ev.id_event}>
+                        {ev.kode_event || ev.nama_event} ({ev.tahun || '2026'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Bentuk Partisipasi *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingTeam({ ...editingTeam, tipe_partisipasi: 'Group' })}
-                    className={`py-2 px-3 rounded-lg border font-semibold flex items-center justify-center gap-1.5 ${
-                      editingTeam.tipe_partisipasi !== 'Individu'
-                        ? 'bg-emerald-800 text-white border-emerald-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Group / Regu</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingTeam({ ...editingTeam, tipe_partisipasi: 'Individu' })}
-                    className={`py-2 px-3 rounded-lg border font-semibold flex items-center justify-center gap-1.5 ${
-                      editingTeam.tipe_partisipasi === 'Individu'
-                        ? 'bg-emerald-800 text-white border-emerald-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Perorangan / Individu</span>
-                  </button>
+                {/* 2. Format Partisipasi */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Bentuk Partisipasi *</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTeam({ ...editingTeam, tipe_partisipasi: 'Group' })}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        editingTeam.tipe_partisipasi !== 'Individu'
+                          ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs ring-2 ring-emerald-700/20'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Group / Regu</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTeam({ ...editingTeam, tipe_partisipasi: 'Individu' })}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        editingTeam.tipe_partisipasi === 'Individu'
+                          ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs ring-2 ring-emerald-700/20'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <UserIcon className="w-3.5 h-3.5" />
+                      <span>Individu</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
+              {/* Grid Kolom untuk Nama & Kategori */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* 3. Nama Regu / Nama Peserta (col-span-2) */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {editingTeam.tipe_partisipasi === 'Individu' ? 'Nama Lengkap Peserta *' : 'Nama Regu / Kelompok *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingTeam.nama_regu}
+                    onChange={(e) => setEditingTeam({ ...editingTeam, nama_regu: e.target.value })}
+                    placeholder={editingTeam.tipe_partisipasi === 'Individu' ? 'Contoh: Ahmad Raihan Pratama' : 'Contoh: Regu Rajawali / Regu Melati'}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                {/* 4. Kategori (Putra / Putri) */}
+                <div className="sm:col-span-1">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Kategori *
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTeam({ ...editingTeam, kategori_regu: 'Putra' })}
+                      className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                        editingTeam.kategori_regu === 'Putra'
+                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Putra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingTeam({ ...editingTeam, kategori_regu: 'Putri' })}
+                      className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                        editingTeam.kategori_regu === 'Putri'
+                          ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Putri
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 2 Kolom untuk Kelas & Ketua/Mentor */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 5. Kelas & Pangkalan */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {editingTeam.tipe_partisipasi === 'Individu' ? 'Kelas & Asal Kontingen *' : 'Kelas & Pangkalan *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingTeam.kelas_pangkalan}
+                    onChange={(e) => setEditingTeam({ ...editingTeam, kelas_pangkalan: e.target.value })}
+                    placeholder="Contoh: Kelas 8A / Pasukan Penggalang Khusus"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                {/* 6. Ketua Regu / Mentor */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {editingTeam.tipe_partisipasi === 'Individu' ? 'Nama Guru Pembimbing / Mentor' : 'Nama Ketua Regu (Pinru)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editingTeam.ketua_regu || ''}
+                    onChange={(e) => setEditingTeam({ ...editingTeam, ketua_regu: e.target.value })}
+                    placeholder={editingTeam.tipe_partisipasi === 'Individu' ? 'Contoh: Ustadz Danang, S.Pd' : 'Contoh: Muhammad Rizky Pratama'}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* 7. Motto / Tekad */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {editingTeam.tipe_partisipasi === 'Individu' ? 'Nama Lengkap Peserta *' : 'Nama Regu / Kelompok *'}
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Motto / Semboyan / Tekad Peserta
                 </label>
                 <input
                   type="text"
-                  required
-                  value={editingTeam.nama_regu}
-                  onChange={(e) => setEditingTeam({ ...editingTeam, nama_regu: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Kategori *</label>
-                <select
-                  value={editingTeam.kategori_regu}
-                  onChange={(e) => setEditingTeam({ ...editingTeam, kategori_regu: e.target.value as any })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                >
-                  <option value="Putra">Putra</option>
-                  <option value="Putri">Putri</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {editingTeam.tipe_partisipasi === 'Individu' ? 'Kelas & Asal Kontingen *' : 'Kelas & Pangkalan *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editingTeam.kelas_pangkalan}
-                  onChange={(e) => setEditingTeam({ ...editingTeam, kelas_pangkalan: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {editingTeam.tipe_partisipasi === 'Individu' ? 'Nama Guru Pembimbing / Mentor' : 'Nama Ketua Regu'}
-                </label>
-                <input
-                  type="text"
-                  value={editingTeam.ketua_regu || ''}
-                  onChange={(e) => setEditingTeam({ ...editingTeam, ketua_regu: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Motto / Tekad</label>
-                <input
-                  type="text"
-                  value={editingTeam.motto}
+                  value={editingTeam.motto || ''}
                   onChange={(e) => setEditingTeam({ ...editingTeam, motto: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  placeholder="Contoh: Tangkas, Berani, dan Berakhlak Mulia"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 italic focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Motto dan Nama Ketua Regu akan tersimpan di database Google Sheets (kolom H &amp; I) serta tampil di kartu pemilih publik.
+                </p>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t">
+              {/* Modal Actions Footer */}
+              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2.5 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 px-5 sm:px-6 py-3.5 bg-slate-50">
                 <button
                   type="button"
                   onClick={() => setEditingTeam(null)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg shadow-sm"
+                  className="px-5 py-2.5 font-bold text-white bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 active:scale-98 rounded-xl shadow-md shadow-emerald-900/20 flex items-center gap-1.5 transition-all cursor-pointer"
                 >
-                  Simpan Perubahan
+                  <Check className="w-4 h-4 text-amber-300" />
+                  <span>Simpan Perubahan ke Database</span>
                 </button>
               </div>
             </form>
@@ -3277,137 +3342,206 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
-      {/* Modal Tambah Peserta (Group / Individu) */}
+      {/* ========================================================================= */}
+      {/* MODAL TAMBAH PESERTA (GROUP / INDIVIDU - RESPONSIVE & PROFESSIONAL) */}
+      {/* ========================================================================= */}
       {showAddTeamModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Tambah Peserta Baru</h3>
-            <p className="text-xs text-slate-500">
-              Dapat didaftarkan sebagai Regu/Kelompok (Group) atau Perorangan (Individu).
-            </p>
-            <form onSubmit={handleCreateParticipant} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Sub-Event *</label>
-                <select
-                  value={newParticipantEventId}
-                  onChange={(e) => setNewParticipantEventId(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300 bg-white"
-                >
-                  {availableEvents.map(ev => (
-                    <option key={ev.id_event} value={ev.id_event}>
-                      {ev.kode_event || ev.nama_event}
-                    </option>
-                  ))}
-                </select>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-800/80 border border-emerald-700/60 flex items-center justify-center text-amber-300 shadow-xs">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white leading-tight">Tambah Peserta Baru</h3>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    Daftarkan peserta Regu / Kelompok atau Perorangan ke Database Cloud
+                  </p>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowAddTeamModal(false)}
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+                title="Tutup Form"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Bentuk Partisipasi *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewParticipantType('Group')}
-                    className={`py-2 px-3 rounded-lg border font-semibold flex items-center justify-center gap-1.5 ${
-                      newParticipantType === 'Group'
-                        ? 'bg-emerald-800 text-white border-emerald-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
+            {/* Modal Body Form */}
+            <form onSubmit={handleCreateParticipant} className="p-5 sm:p-6 space-y-4 text-xs">
+              {/* Grid 2 Kolom untuk Sub-Event & Format Partisipasi */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1. Sub-Event */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Sub-Event Target *</span>
+                  </label>
+                  <select
+                    value={newParticipantEventId}
+                    onChange={(e) => setNewParticipantEventId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                   >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Group / Regu</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewParticipantType('Individu')}
-                    className={`py-2 px-3 rounded-lg border font-semibold flex items-center justify-center gap-1.5 ${
-                      newParticipantType === 'Individu'
-                        ? 'bg-emerald-800 text-white border-emerald-800'
-                        : 'bg-white text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Perorangan / Individu</span>
-                  </button>
+                    {availableEvents.map(ev => (
+                      <option key={ev.id_event} value={ev.id_event}>
+                        {ev.kode_event || ev.nama_event} ({ev.tahun || '2026'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Format Partisipasi */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Bentuk Partisipasi *</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewParticipantType('Group')}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        newParticipantType === 'Group'
+                          ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs ring-2 ring-emerald-700/20'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Group / Regu</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewParticipantType('Individu')}
+                      className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        newParticipantType === 'Individu'
+                          ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs ring-2 ring-emerald-700/20'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <UserIcon className="w-3.5 h-3.5" />
+                      <span>Individu</span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
+              {/* Grid Kolom untuk Nama & Kategori */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* 3. Nama Regu / Nama Peserta (col-span-2) */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {newParticipantType === 'Individu' ? 'Nama Lengkap Peserta *' : 'Nama Regu / Kelompok *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={newParticipantType === 'Individu' ? 'Contoh: Ahmad Raihan Pratama' : 'Contoh: Regu Rajawali / Regu Melati'}
+                    value={newTeamName}
+                    onChange={(e) => setNewTeamName(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                {/* 4. Kategori (Putra / Putri) */}
+                <div className="sm:col-span-1">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Kategori *
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNewTeamGender('Putra')}
+                      className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                        newTeamGender === 'Putra'
+                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Putra
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewTeamGender('Putri')}
+                      className={`py-2 px-2 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
+                        newTeamGender === 'Putri'
+                          ? 'bg-rose-700 text-white border-rose-700 shadow-xs'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Putri
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 2 Kolom untuk Kelas & Ketua/Mentor */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 5. Kelas & Pangkalan */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {newParticipantType === 'Individu' ? 'Kelas & Asal Kontingen *' : 'Kelas & Pangkalan *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Kelas 8A / Pasukan Khusus"
+                    value={newTeamClass}
+                    onChange={(e) => setNewTeamClass(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                {/* 6. Ketua Regu / Mentor */}
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    {newParticipantType === 'Individu' ? 'Nama Guru Pembimbing / Mentor' : 'Nama Ketua Regu (Pinru)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={newParticipantType === 'Individu' ? 'Contoh: Ustadz Danang, S.Pd' : 'Contoh: Muhammad Danis'}
+                    value={newTeamLeader}
+                    onChange={(e) => setNewTeamLeader(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* 7. Motto / Tekad */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {newParticipantType === 'Individu' ? 'Nama Lengkap Peserta *' : 'Nama Regu / Kelompok *'}
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Motto / Semboyan / Tekad Peserta
                 </label>
                 <input
                   type="text"
-                  required
-                  placeholder={newParticipantType === 'Individu' ? 'Contoh: Ahmad Raihan Pratama' : 'Contoh: Regu Kancil / Regu Dahlia'}
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Kategori *</label>
-                <select
-                  value={newTeamGender}
-                  onChange={(e) => setNewTeamGender(e.target.value as any)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                >
-                  <option value="Putra">Putra</option>
-                  <option value="Putri">Putri</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {newParticipantType === 'Individu' ? 'Kelas & Asal Kontingen *' : 'Kelas & Pangkalan *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Kelas 8A / Kafilah Utama"
-                  value={newTeamClass}
-                  onChange={(e) => setNewTeamClass(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  {newParticipantType === 'Individu' ? 'Nama Guru Pembimbing / Mentor' : 'Nama Ketua Regu'}
-                </label>
-                <input
-                  type="text"
-                  placeholder={newParticipantType === 'Individu' ? 'Contoh: Ustadz Hidayat' : 'Contoh: Muhammad Danis'}
-                  value={newTeamLeader}
-                  onChange={(e) => setNewTeamLeader(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Motto / Tekad</label>
-                <input
-                  type="text"
-                  placeholder="Contoh: Tangguh, Cerdas, dan Berakhlak Qurani"
+                  placeholder="Contoh: Tangkas, Mandiri, dan Berakhlak Qurani"
                   value={newTeamMotto}
                   onChange={(e) => setNewTeamMotto(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 italic focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Motto dan Nama Ketua Regu akan otomatis tersimpan ke kolom H &amp; I Google Sheets Database.
+                </p>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              {/* Modal Actions Footer */}
+              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2.5 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 px-5 sm:px-6 py-3.5 bg-slate-50">
                 <button
                   type="button"
                   onClick={() => setShowAddTeamModal(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg"
+                  className="px-5 py-2.5 font-bold text-white bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 active:scale-98 rounded-xl shadow-md shadow-emerald-900/20 flex items-center gap-1.5 transition-all cursor-pointer"
                 >
-                  Simpan Peserta
+                  <Plus className="w-4 h-4" />
+                  <span>Simpan Peserta ke Database</span>
                 </button>
               </div>
             </form>

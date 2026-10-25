@@ -38,7 +38,7 @@ var SCHEMAS = [
   },
   {
     name: SHEETS.TEAMS,
-    headers: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota']
+    headers: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota', 'ketua_regu', 'motto', 'tipe_partisipasi']
   },
   {
     name: SHEETS.JURY_SCORES,
@@ -224,21 +224,21 @@ var INITIAL_DATA = {
     ]
   ],
   teams: [
-    ['team-rajawali', 'duta-camp-2026', 'Regu Rajawali', 'Kelas 8A / Pasukan Penggalang Khusus', 'Putra', '', '["Muhammad Rizky Pratama"]'],
-    ['team-elang', 'duta-camp-2026', 'Regu Elang', 'Kelas 8B / Pasukan Penggalang Inti', 'Putra', '', '["Farhan Nur Hidayat"]'],
-    ['team-garuda', 'duta-camp-2026', 'Regu Garuda', 'Kelas 7A / Pasukan Penggalang Ramu', 'Putra', '', '["Abdullah Azzam"]'],
-    ['team-serigala', 'duta-camp-2026', 'Regu Serigala', 'Kelas 7B / Pasukan Penggalang Rakit', 'Putra', '', '["Haikal Danendra"]'],
-    ['team-melati', 'duta-camp-2026', 'Regu Melati', 'Kelas 8C / Pasukan Penggalang Putri Utama', 'Putri', '', '["Nayla Zahra Salsabila"]'],
-    ['team-mawar', 'duta-camp-2026', 'Regu Mawar', 'Kelas 8D / Pasukan Penggalang Putri Mandiri', 'Putri', '', '["Syifa Aulia Rahman"]'],
-    ['team-sakura', 'duta-camp-2026', 'Regu Sakura', 'Kelas 7C / Pasukan Penggalang Harapan', 'Putri', '', '["Amina Khadijah"]'],
-    ['team-anggrek', 'duta-camp-2026', 'Regu Anggrek', 'Kelas 7D / Pasukan Penggalang Cerdas', 'Putri', '', '["Fathimah Azzahra"]'],
-    ['phbi-raihan', 'phbi-2026', 'Muhammad Raihan Pratama', "Kelas 8B / Kontingen Da'i Mandiri", 'Putra', '', '[]'],
-    ['phbi-zahra', 'phbi-2026', 'Sarah Azzahra Al-Hafizhah', 'Kelas 7C / Kafilah Tahfidz Khusus', 'Putri', '', '[]'],
-    ['phbi-hadroh', 'phbi-2026', 'Grup Hadroh Shautud Duta', 'Kelas 9A / Sanggar Sholawat Utama', 'Putra', '', '[]'],
-    ['phbi-nasyid', 'phbi-2026', 'Grup Nasyid Nada Insani', 'Kelas 8C / Sanggar Nada Muslimah', 'Putri', '', '[]'],
-    ['phbn-dimas', 'phbn-2026', 'Dimas Arya Putra', 'Kelas 9C / Duta Orator Sekolah', 'Putra', '', '[]'],
-    ['phbn-aisyah', 'phbn-2026', 'Aisyah Humaira', 'Kelas 8C / Orator Penggerak', 'Putri', '', '[]'],
-    ['phbn-padus', 'phbn-2026', 'Tim Padus Gema Persada', 'Gabungan Kelas 8 & 9 / Gita Duta Swara', 'Putri', '', '[]']
+    ['team-rajawali', 'duta-camp-2026', 'Regu Rajawali', 'Kelas 8A / Pasukan Penggalang Khusus', 'Putra', '', '["Muhammad Rizky Pratama"]', 'Muhammad Rizky Pratama', 'Tangkas, Berani, Berakhlak Mulia', 'Group'],
+    ['team-elang', 'duta-camp-2026', 'Regu Elang', 'Kelas 8B / Pasukan Penggalang Inti', 'Putra', '', '["Farhan Nur Hidayat"]', 'Farhan Nur Hidayat', 'Terbang Tinggi Menggapai Prestasi', 'Group'],
+    ['team-garuda', 'duta-camp-2026', 'Regu Garuda', 'Kelas 7A / Pasukan Penggalang Ramu', 'Putra', '', '["Abdullah Azzam"]', 'Abdullah Azzam', 'Gagah Perkasa Pantang Menyerah', 'Group'],
+    ['team-serigala', 'duta-camp-2026', 'Regu Serigala', 'Kelas 7B / Pasukan Penggalang Rakit', 'Putra', '', '["Haikal Danendra"]', 'Haikal Danendra', 'Setia Kawan, Disiplin dan Berani', 'Group'],
+    ['team-melati', 'duta-camp-2026', 'Regu Melati', 'Kelas 8C / Pasukan Penggalang Putri Utama', 'Putri', '', '["Nayla Zahra Salsabila"]', 'Nayla Zahra Salsabila', 'Harum Namamu, Mulia Akhlakmu', 'Group'],
+    ['team-mawar', 'duta-camp-2026', 'Regu Mawar', 'Kelas 8D / Pasukan Penggalang Putri Mandiri', 'Putri', '', '["Syifa Aulia Rahman"]', 'Syifa Aulia Rahman', 'Tegar Berduri, Indah Berbudi', 'Group'],
+    ['team-sakura', 'duta-camp-2026', 'Regu Sakura', 'Kelas 7C / Pasukan Penggalang Harapan', 'Putri', '', '["Amina Khadijah"]', 'Amina Khadijah', 'Mekar Ceria Penuh Prestasi', 'Group'],
+    ['team-anggrek', 'duta-camp-2026', 'Regu Anggrek', 'Kelas 7D / Pasukan Penggalang Cerdas', 'Putri', '', '["Fathimah Azzahra"]', 'Fathimah Azzahra', 'Anggun Berkarakter Qurani', 'Group'],
+    ['phbi-raihan', 'phbi-2026', 'Muhammad Raihan Pratama', "Kelas 8B / Kontingen Da'i Mandiri", 'Putra', '', '[]', 'Ustadz Danang', 'Dakwah Cerdas Berakhlak Mulia', 'Individu'],
+    ['phbi-zahra', 'phbi-2026', 'Sarah Azzahra Al-Hafizhah', 'Kelas 7C / Kafilah Tahfidz Khusus', 'Putri', '', '[]', 'Ustadzah Halimah', 'Mendekap Al-Quran di Lubuk Hati', 'Individu'],
+    ['phbi-hadroh', 'phbi-2026', 'Grup Hadroh Shautud Duta', 'Kelas 9A / Sanggar Sholawat Utama', 'Putra', '', '[]', 'Ahmad Fauzan', 'Gema Sholawat Menyejukkan Jiwa', 'Group'],
+    ['phbi-nasyid', 'phbi-2026', 'Grup Nasyid Nada Insani', 'Kelas 8C / Sanggar Nada Muslimah', 'Putri', '', '[]', 'Nabila Qatrunnada', 'Harmoni Dakwah Nada Suci', 'Group'],
+    ['phbn-dimas', 'phbn-2026', 'Dimas Arya Putra', 'Kelas 9C / Duta Orator Sekolah', 'Putra', '', '[]', 'Kak Hendra', 'Kobarkan Jiwa Patriotisme Bangsa', 'Individu'],
+    ['phbn-aisyah', 'phbn-2026', 'Aisyah Humaira', 'Kelas 8C / Orator Penggerak', 'Putri', '', '[]', 'Bunda Ratna', 'Generasi Emas Harapan Indonesia', 'Individu'],
+    ['phbn-padus', 'phbn-2026', 'Tim Padus Gema Persada', 'Gabungan Kelas 8 & 9 / Gita Duta Swara', 'Putri', '', '[]', 'Ibu Cindy', 'Satu Nusa Satu Bangsa Berkarya', 'Group']
   ],
   jury_scores: [
     [
@@ -461,11 +461,17 @@ function doPost(e) {
 function getAllDatabaseData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   fixUserRowsAlignment();
+  var teamSheet = ss.getSheetByName(SHEETS.TEAMS);
+  if (teamSheet) {
+    ensureHeaderExists(teamSheet, 'ketua_regu');
+    ensureHeaderExists(teamSheet, 'motto');
+    ensureHeaderExists(teamSheet, 'tipe_partisipasi');
+  }
   return {
     users: getSheetDataAsObjects(ss.getSheetByName(SHEETS.USERS)),
     events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),
     categories: getSheetDataAsObjects(ss.getSheetByName(SHEETS.CATEGORIES)),
-    teams: getSheetDataAsObjects(ss.getSheetByName(SHEETS.TEAMS)),
+    teams: getSheetDataAsObjects(teamSheet),
     jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
     public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),
     config: getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'))
@@ -776,6 +782,10 @@ function handleManageTeam(data) {
     sheet = ss.getSheetByName(SHEETS.TEAMS);
   }
 
+  ensureHeaderExists(sheet, 'ketua_regu');
+  ensureHeaderExists(sheet, 'motto');
+  ensureHeaderExists(sheet, 'tipe_partisipasi');
+
   var op = data.operation || 'create';
   var idTeam = String(data.id_team || ('team-' + new Date().getTime()));
   var rows = sheet.getDataRange().getValues();
@@ -794,11 +804,14 @@ function handleManageTeam(data) {
   var teamObj = {
     id_team: idTeam,
     id_event: data.id_event || 'duta-camp-2026',
-    nama_regu: data.nama_regu,
-    kelas_pangkalan: data.kelas_pangkalan,
+    nama_regu: data.nama_regu || '',
+    kelas_pangkalan: data.kelas_pangkalan || '',
     kategori_regu: data.kategori_regu || 'Putra',
     foto_url: data.foto_url || '',
-    anggota: anggotaStr
+    anggota: anggotaStr,
+    ketua_regu: data.ketua_regu || '',
+    motto: data.motto || '',
+    tipe_partisipasi: data.tipe_partisipasi || 'Group'
   };
 
   if (op === 'update') {
