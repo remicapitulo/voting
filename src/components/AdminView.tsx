@@ -62,7 +62,8 @@ import {
   Table,
   Medal,
   Cloud,
-  Loader2
+  Loader2,
+  Database
 } from 'lucide-react';
 import { getFallbackCriteria, DRIVE_LOGO_FOLDER_ID } from '../services/apiService';
 import { getTeamInitials } from '../utils/initials';
@@ -158,6 +159,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [editingJury, setEditingJury] = useState<User | null>(null);
   const [editJuryPassword, setEditJuryPassword] = useState<string>('');
 
+  // Deletion confirmation modals state (replaces window.confirm to prevent iframe sandbox suppression)
+  const [juryToDelete, setJuryToDelete] = useState<User | null>(null);
+  const [isDeletingJury, setIsDeletingJury] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<TeamModel | null>(null);
+  const [isDeletingTeam, setIsDeletingTeam] = useState(false);
+
   // New team/participant form state
   const [newParticipantEventId, setNewParticipantEventId] = useState<string>(event.id_event);
   const [newParticipantType, setNewParticipantType] = useState<'Group' | 'Individu'>('Group');
@@ -193,6 +200,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [newJuryUsername, setNewJuryUsername] = useState('');
   const [newJuryPassword, setNewJuryPassword] = useState('');
   const [newJurySpecialty, setNewJurySpecialty] = useState('Dewan Juri Khusus');
+  const [isSubmittingJury, setIsSubmittingJury] = useState(false);
+  const [juryFormError, setJuryFormError] = useState<string | null>(null);
 
   // Criteria & Questions management state
   const [newQuestionText, setNewQuestionText] = useState('');
@@ -220,6 +229,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CategoryModel | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<CategoryModel | null>(null);
+  const [isSyncingCategory, setIsSyncingCategory] = useState(false);
 
   // New Category form state
   const [newCatName, setNewCatName] = useState('');
@@ -234,6 +244,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     'Penguasaan materi & penampilan\nKekompakan & kedisiplinan\nKreativitas & originalitas'
   );
   const [newCatAssignedJuries, setNewCatAssignedJuries] = useState<string[]>([]);
+  const [isPurging, setIsPurging] = useState(false);
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
   const juryUsers = users.filter(u => u.role === 'juri');
@@ -262,12 +273,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleToggleSubEventStatus = (eventId: string, currentStatus: boolean) => {
+  const handleToggleSubEventStatus = async (eventId: string, currentStatus: boolean) => {
     const newStatus = !currentStatus;
-    const res = apiService.toggleEventStatus(eventId, newStatus);
+    const res = await apiService.toggleEventStatus(eventId, newStatus);
     if (res.success) {
       setBannerMsg({ type: 'success', text: res.message });
-      onRefreshData();
+      await onRefreshData();
       setTimeout(() => setBannerMsg(null), 3500);
     }
   };
@@ -364,73 +375,129 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   const handleDeleteTeam = (team: TeamModel) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus peserta "${team.nama_regu}" (${team.kelas_pangkalan})?\n\nPerhatian: Seluruh nilai dewan juri dan vote publik untuk peserta ini akan ikut terhapus secara permanen.`)) {
+    setTeamToDelete(team);
+  };
+
+  const confirmDeleteTeam = async () => {
+    if (!teamToDelete) return;
+    setIsDeletingTeam(true);
+    try {
+      const res = apiService.deleteTeam(teamToDelete.id_team);
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setTeamToDelete(null);
+        onRefreshData();
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setBannerMsg({ type: 'error', text: err.message || 'Gagal menghapus data peserta' });
+    } finally {
+      setIsDeletingTeam(false);
+    }
+  };
+
+  const handleCreateJury = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setJuryFormError(null);
+    if (!newJuryName.trim()) {
+      setJuryFormError('Nama lengkap & gelar wajib diisi.');
       return;
     }
-    const res = apiService.deleteTeam(team.id_team);
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3500);
+    if (!newJuryUsername.trim()) {
+      setJuryFormError('Username wajib diisi.');
+      return;
+    }
+    if (!newJuryPassword || newJuryPassword.trim().length < 4) {
+      setJuryFormError('Password juri minimal 4 karakter.');
+      return;
+    }
+
+    setIsSubmittingJury(true);
+    try {
+      const res = await apiService.addJury({
+        nama: newJuryName.trim(),
+        username: newJuryUsername.trim(),
+        password: newJuryPassword.trim(),
+        jurySpecialty: newJurySpecialty.trim()
+      });
+
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setShowAddJuryModal(false);
+        setNewJuryName('');
+        setNewJuryUsername('');
+        setNewJuryPassword('');
+        setNewJurySpecialty('Dewan Juri Khusus');
+        setJuryFormError(null);
+        await onRefreshData();
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setJuryFormError(res.message);
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setJuryFormError(err.message || 'Terjadi gangguan koneksi saat menyimpan akun juri.');
+    } finally {
+      setIsSubmittingJury(false);
     }
   };
 
-  const handleCreateJury = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newJuryName || !newJuryUsername || !newJuryPassword) return;
-
-    const res = apiService.addJury({
-      nama: newJuryName.trim(),
-      username: newJuryUsername.trim(),
-      password: newJuryPassword.trim(),
-      jurySpecialty: newJurySpecialty.trim()
-    });
-
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      setShowAddJuryModal(false);
-      setNewJuryName('');
-      setNewJuryUsername('');
-      setNewJuryPassword('');
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
-    } else {
-      setBannerMsg({ type: 'error', text: res.message });
-    }
-  };
-
-  const handleUpdateJury = (e: React.FormEvent) => {
+  const handleUpdateJury = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingJury) return;
+    setJuryFormError(null);
 
-    const res = apiService.updateJury({
-      id: editingJury.id,
-      nama: editingJury.nama,
-      username: editingJury.username,
-      password: editJuryPassword,
-      jurySpecialty: editingJury.jurySpecialty || 'Dewan Juri Khusus'
-    });
+    setIsSubmittingJury(true);
+    try {
+      const res = await apiService.updateJury({
+        id: editingJury.id,
+        nama: editingJury.nama,
+        username: editingJury.username,
+        password: editJuryPassword,
+        jurySpecialty: editingJury.jurySpecialty || 'Dewan Juri Khusus'
+      });
 
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      setEditingJury(null);
-      setEditJuryPassword('');
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
-    } else {
-      setBannerMsg({ type: 'error', text: res.message });
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setEditingJury(null);
+        setEditJuryPassword('');
+        setJuryFormError(null);
+        await onRefreshData();
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setJuryFormError(res.message);
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setJuryFormError(err.message || 'Terjadi gangguan saat memperbarui data juri.');
+    } finally {
+      setIsSubmittingJury(false);
     }
   };
 
   const handleDeleteJury = (jury: User) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus akun Dewan Juri "${jury.nama}" (@${jury.username})?\n\nPerhatian: Semua penilaian yang pernah diinput oleh juri ini akan ikut terhapus.`)) {
-      return;
-    }
-    const res = apiService.deleteJury(jury.id);
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3500);
+    setJuryToDelete(jury);
+  };
+
+  const confirmDeleteJury = async () => {
+    if (!juryToDelete) return;
+    setIsDeletingJury(true);
+    try {
+      const res = await apiService.deleteJury(juryToDelete.id, juryToDelete.username, juryToDelete.nama);
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setJuryToDelete(null);
+        await onRefreshData();
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setBannerMsg({ type: 'error', text: err.message || 'Gagal menghapus akun dewan juri' });
+    } finally {
+      setIsDeletingJury(false);
     }
   };
 
@@ -504,12 +571,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (!categoryToDelete) return;
-    const res = apiService.deleteCategory(categoryToDelete.id_kategori);
+    const res = await apiService.deleteCategory(
+      categoryToDelete.id_kategori,
+      categoryToDelete.nama_kategori,
+      categoryToDelete.id_event
+    );
     if (res.success) {
       setBannerMsg({ type: 'success', text: res.message });
-      // If deleted category was currently selected, select another category in the subevent
+      // If deleted category was currently selected, select another category in the event
       if (selectedCategoryId === categoryToDelete.id_kategori) {
         const remaining = categories.filter(
           c => c.id_event === categoryToDelete.id_event && c.id_kategori !== categoryToDelete.id_kategori
@@ -519,12 +590,41 @@ export const AdminView: React.FC<AdminViewProps> = ({
         }
       }
       setCategoryToDelete(null);
-      onRefreshData();
+      await onRefreshData();
       setTimeout(() => setBannerMsg(null), 3500);
     } else {
       setBannerMsg({ type: 'error', text: res.message });
       setCategoryToDelete(null);
       setTimeout(() => setBannerMsg(null), 4000);
+    }
+  };
+
+  const handleSyncCategoryWithCloud = async () => {
+    setIsSyncingCategory(true);
+    try {
+      const res = await apiService.syncFromDatabase();
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: 'Data cabang lomba berhasil disinkronkan langsung dari Google Sheets!' });
+        await onRefreshData();
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (e: any) {
+      setBannerMsg({ type: 'error', text: 'Gagal sinkronisasi database: ' + e.message });
+    } finally {
+      setIsSyncingCategory(false);
+      setTimeout(() => setBannerMsg(null), 3500);
+    }
+  };
+
+  const handlePurgeStaleCategory = async (catName: string, catId: string = 'cat-chef') => {
+    const res = await apiService.purgeCategoryFromDatabase(catId, catName, selectedAdminSubEventId);
+    if (res.success) {
+      setBannerMsg({ type: 'success', text: res.message });
+      await onRefreshData();
+      setTimeout(() => setBannerMsg(null), 4000);
+    } else {
+      setBannerMsg({ type: 'error', text: res.message });
     }
   };
 
@@ -906,7 +1006,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               Manajemen Sistem & Rekapitulasi Terpadu
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              SMPIT Pondok Duta · Kelola Sub-Event, pembobotan nilai, batasan hak suara, dan form dewan juri.
+              SMPIT Pondok Duta · Kelola Event, pembobotan nilai, batasan hak suara, dan form dewan juri.
             </p>
           </div>
 
@@ -914,7 +1014,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <Calendar className="w-5 h-5 text-emerald-700 shrink-0" />
             <div>
               <div className="text-[11px] text-emerald-800 font-semibold uppercase tracking-wider">
-                Sub-Event Utama di Aplikasi:
+                Event Utama di Aplikasi:
               </div>
               <div className="text-sm font-extrabold text-emerald-950 flex items-center gap-2">
                 <span>{event.nama_event}</span>
@@ -939,7 +1039,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             }`}
           >
             <Calendar className="w-4 h-4" />
-            <span>Sub-Event & Batas Waktu</span>
+            <span>Event & Batas Waktu</span>
           </button>
 
           <button
@@ -1012,10 +1112,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                Pilih & Atur Sub-Event (Status Buka / Kunci & Batas Waktu)
+                Pilih & Atur Event (Status Buka / Kunci & Batas Waktu)
               </h3>
               <p className="text-xs text-slate-500">
-                Aturan Tampilan Pemilih Bebas: Sub-Event yang <strong>DIKUNCI</strong> otomatis di-<strong>HIDE</strong> dari menu. Jika <strong>batas waktu habis namun belum dikunci</strong>, sub-event tetap muncul di menu dengan status <strong>Close</strong> (voting dinonaktifkan).
+                Aturan Tampilan Pemilih Bebas: Event yang <strong>DIKUNCI</strong> otomatis di-<strong>HIDE</strong> dari menu. Jika <strong>batas waktu habis namun belum dikunci</strong>, event tetap muncul di menu dengan status <strong>Close</strong> (voting dinonaktifkan).
               </p>
             </div>
             <button
@@ -1152,12 +1252,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       {isOfficialActive ? (
                         <>
                           <Lock className="w-3.5 h-3.5 text-rose-600" />
-                          <span>Tutup Sub-Event Ini (Kunci Vote & Juri)</span>
+                          <span>Tutup Event Ini (Kunci Vote & Juri)</span>
                         </>
                       ) : (
                         <>
                           <Unlock className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>Buka Kembali Sub-Event Ini</span>
+                          <span>Buka Kembali Event Ini</span>
                         </>
                       )}
                     </button>
@@ -1169,7 +1269,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         className="w-full py-2 px-3 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
                       >
                         <Calendar className="w-3.5 h-3.5 text-amber-300" />
-                        <span>Buka & Jadikan Sub-Event Utama</span>
+                        <span>Buka & Jadikan Event Utama</span>
                       </button>
                     )}
                   </div>
@@ -1185,7 +1285,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wide mr-1">
-              Pilih Sub-Event:
+              Pilih Event:
             </span>
             <select
               value={selectedAdminSubEventId}
@@ -2236,16 +2336,29 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={() => {
-                  setNewCatEventId(selectedAdminSubEventId);
-                  setShowAddCategoryModal(true);
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl flex items-center gap-2 transition-colors shadow-xs shrink-0 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Tambah Cabang Lomba</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSyncCategoryWithCloud}
+                  disabled={isSyncingCategory}
+                  className="px-3.5 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-60"
+                  title="Sinkronkan ulang data cabang lomba langsung dari Database Google Sheets"
+                >
+                  <Database className={`w-3.5 h-3.5 ${isSyncingCategory ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingCategory ? 'Menyinkronkan...' : 'Sinkron Database'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setNewCatEventId(selectedAdminSubEventId);
+                    setShowAddCategoryModal(true);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl flex items-center gap-2 transition-colors shadow-xs shrink-0 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Cabang Lomba</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -2772,7 +2885,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           <div className="min-w-0 flex-1 text-xs">
                             <div className="font-bold text-slate-900 truncate">{jury.nama}</div>
                             <div className="text-[11px] text-emerald-800 font-medium truncate mt-0.5">
-                              {jury.jurySpecialty || `@${jury.username}`}
+                              {jury.jurySpecialty || jury.username}
                             </div>
                             <div className="mt-2 flex items-center gap-1.5">
                               {isAssigned ? (
@@ -2826,7 +2939,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <span>Tambah Peserta (Group / Individu)</span>
               </button>
               <button
-                onClick={() => setShowAddJuryModal(true)}
+                onClick={() => {
+                  setJuryFormError(null);
+                  setShowAddJuryModal(true);
+                }}
                 className="px-3.5 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -2839,16 +2955,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                Daftar Peserta Sub-Event: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event} ({subEventTeams.length})
+                Daftar Peserta Event: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event} ({subEventTeams.length})
               </h4>
               <span className="text-xs text-slate-500">
-                Tipe Sub-Event: <strong>{currentAdminSubEvent.tipe_peserta || 'Group'}</strong>
+                Tipe Event: <strong>{currentAdminSubEvent.tipe_peserta || 'Group'}</strong>
               </span>
             </div>
 
             {subEventTeams.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-400">
-                Belum ada peserta terdaftar pada sub-event ini. Klik "Tambah Peserta" untuk menambahkan.
+                Belum ada peserta terdaftar pada event ini. Klik "Tambah Peserta" untuk menambahkan.
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -2910,40 +3026,44 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </h4>
             </div>
             <div className="divide-y divide-slate-100">
-              {juryUsers.map(j => (
-                <div key={j.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
-                  <div className="flex-1">
-                    <span className="font-bold text-sm text-slate-900">{j.nama}</span>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Username: <strong className="font-mono text-slate-800">@{j.username}</strong> · Penugasan: {j.jurySpecialty || 'Juri'}
-                    </p>
-                  </div>
+              {juryUsers.map(j => {
+                const cleanUname = j.username.replace(/^@+/, '');
+                return (
+                  <div key={j.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                    <div className="flex-1">
+                      <span className="font-bold text-sm text-slate-900">{j.nama}</span>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Username: <strong className="font-mono text-slate-800">{cleanUname}</strong> · Penugasan: {j.jurySpecialty || 'Juri'}
+                      </p>
+                    </div>
 
-                  {/* Action buttons for Jury */}
-                  <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                    <button
-                      onClick={() => {
-                        setEditingJury({ ...j });
-                        setEditJuryPassword('');
-                      }}
-                      className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-emerald-800 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
-                      title="Edit Akun Juri"
-                    >
-                      <Edit2 className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>Edit</span>
-                    </button>
+                    {/* Action buttons for Jury */}
+                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                      <button
+                        onClick={() => {
+                          setEditingJury({ ...j, username: cleanUname });
+                          setEditJuryPassword('');
+                          setJuryFormError(null);
+                        }}
+                        className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-emerald-800 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                        title="Edit Akun Juri"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Edit</span>
+                      </button>
 
-                    <button
-                      onClick={() => handleDeleteJury(j)}
-                      className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg flex items-center gap-1.5 transition-colors"
-                      title="Hapus Akun Juri"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                      <span>Hapus</span>
-                    </button>
+                      <button
+                        onClick={() => handleDeleteJury(j)}
+                        className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Hapus Akun Juri"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -3160,83 +3280,138 @@ export const AdminView: React.FC<AdminViewProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL EDIT AKUN DEWAN JURI (BARU) */}
+      {/* MODAL EDIT AKUN DEWAN JURI (RESPONSIVE & PROFESSIONAL) */}
       {/* ========================================================================= */}
       {editingJury && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Edit Akun Dewan Juri</h3>
-                <p className="text-xs text-slate-500">ID: {editingJury.id}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 shadow-2xl">
+            {/* Modal Header */}
+            <div className="px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-800/80 border border-emerald-700/60 flex items-center justify-center text-amber-300 shadow-xs">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white leading-tight">Edit Akun Dewan Juri</h3>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    ID: <span className="font-mono text-amber-300 font-semibold">{editingJury.id}</span> · Perbarui identitas &amp; hak akses
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setEditingJury(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+                title="Tutup Modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleUpdateJury} className="space-y-3 text-xs">
+            {/* Modal Body Form */}
+            <form onSubmit={handleUpdateJury} className="p-5 sm:p-6 space-y-4 text-xs">
+              {/* Inline Error Notification */}
+              {juryFormError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2.5 shadow-xs animate-in fade-in duration-200">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold text-rose-900">Gagal Memperbarui Akun Juri</p>
+                    <p className="text-[11px] text-rose-700 mt-0.5 leading-relaxed">{juryFormError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* 1. Nama Lengkap & Gelar */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nama Lengkap & Gelar *</label>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Nama Lengkap &amp; Gelar *</span>
+                </label>
                 <input
                   type="text"
                   required
                   value={editingJury.nama}
                   onChange={(e) => setEditingJury({ ...editingJury, nama: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  placeholder="Contoh: Kak Wahyu Subekti, S.Pd"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
               </div>
 
+              {/* 2. Penugasan / Spesialisasi */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Penugasan / Spesialisasi</label>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Penugasan / Spesialisasi Dewan Juri</span>
+                </label>
                 <input
                   type="text"
                   value={editingJury.jurySpecialty || ''}
                   onChange={(e) => setEditingJury({ ...editingJury, jurySpecialty: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  placeholder="Contoh: Juri Pentas Seni / Pidato / Semua Kategori"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Keterangan bidang keahlian juri untuk mempermudah identifikasi tugas.
+                </p>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Username *</label>
-                <input
-                  type="text"
-                  required
-                  value={editingJury.username}
-                  onChange={(e) => setEditingJury({ ...editingJury, username: e.target.value })}
-                  className="w-full p-2.5 rounded-lg border border-slate-300 font-mono"
-                />
+              {/* 3. Username & Password */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Username Login *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingJury.username}
+                    onChange={(e) => setEditingJury({ ...editingJury, username: e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, '') })}
+                    placeholder="Contoh: juri1"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Password Baru
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Kosongkan jika tidak diganti"
+                    value={editJuryPassword}
+                    onChange={(e) => setEditJuryPassword(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Min. 4 karakter jika diubah</p>
+                </div>
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Password Baru (Opsional, kosongkan jika tidak diubah)
-                </label>
-                <input
-                  type="password"
-                  placeholder="Ketik password baru..."
-                  value={editJuryPassword}
-                  onChange={(e) => setEditJuryPassword(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t">
+              {/* Modal Actions Footer */}
+              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2.5 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 px-5 sm:px-6 py-3.5 bg-slate-50">
                 <button
                   type="button"
+                  disabled={isSubmittingJury}
                   onClick={() => setEditingJury(null)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg shadow-sm"
+                  disabled={isSubmittingJury}
+                  className="px-5 py-2.5 font-bold text-white bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 active:scale-98 rounded-xl shadow-md shadow-emerald-900/20 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Simpan Perubahan
+                  {isSubmittingJury ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                      <span>Menyimpan ke Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-amber-300" />
+                      <span>Simpan Perubahan</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -3248,13 +3423,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
       {showAddSubEventModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
           <div className="w-full max-w-lg bg-white rounded-xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Tambah Sub-Event Baru</h3>
+            <h3 className="text-base font-bold text-slate-900">Tambah Event Baru</h3>
             <p className="text-xs text-slate-500">
               Buat agenda acara baru sekolah seperti PHBI, PHBN, Class Meeting, atau Milad Sekolah.
             </p>
             <form onSubmit={handleCreateSubEvent} className="space-y-3 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nama Sub-Event *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Nama Event *</label>
                 <input
                   type="text"
                   required
@@ -3334,7 +3509,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   type="submit"
                   className="px-4 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg"
                 >
-                  Buat Sub-Event
+                  Buat Event
                 </button>
               </div>
             </form>
@@ -3379,7 +3554,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
                     <Calendar className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>Sub-Event Target *</span>
+                    <span>Event Target *</span>
                   </label>
                   <select
                     value={newParticipantEventId}
@@ -3549,76 +3724,149 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
-      {/* Modal Buat Akun Juri */}
+      {/* ========================================================================= */}
+      {/* MODAL BUAT AKUN DEWAN JURI BARU (RESPONSIVE & PROFESSIONAL) */}
+      {/* ========================================================================= */}
       {showAddJuryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Buat Akun Dewan Juri Baru</h3>
-            <p className="text-xs text-slate-500">
-              Akun juri hanya dapat dibuat oleh Admin dan memiliki akses memberikan rating 1 - 5.
-            </p>
-            <form onSubmit={handleCreateJury} className="space-y-3 text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-200 overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 shadow-2xl">
+            {/* Modal Header */}
+            <div className="px-5 sm:px-6 py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-800/80 border border-emerald-700/60 flex items-center justify-center text-amber-300 shadow-xs">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white leading-tight">Buat Akun Dewan Juri Baru</h3>
+                  <p className="text-xs text-emerald-200/90 mt-0.5">
+                    Akses formulir penilaian skala 1-5 &amp; tersimpan ke database Google Sheets
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddJuryModal(false)}
+                className="p-1.5 rounded-lg text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
+                title="Tutup Modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body Form */}
+            <form onSubmit={handleCreateJury} className="p-5 sm:p-6 space-y-4 text-xs">
+              {/* Inline Error Notification */}
+              {juryFormError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2.5 shadow-xs animate-in fade-in duration-200">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold text-rose-900">Gagal Membuat Akun Juri</p>
+                    <p className="text-[11px] text-rose-700 mt-0.5 leading-relaxed">{juryFormError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* 1. Nama Lengkap & Gelar */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nama Lengkap & Gelar *</label>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <UserIcon className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Nama Lengkap &amp; Gelar Dewan Juri *</span>
+                </label>
                 <input
                   type="text"
                   required
                   placeholder="Contoh: Kak Wahyu Subekti, S.Pd"
                   value={newJuryName}
                   onChange={(e) => setNewJuryName(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
               </div>
 
+              {/* 2. Penugasan / Spesialisasi */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Penugasan / Spesialisasi</label>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Penugasan / Spesialisasi</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="Contoh: Dewan Juri Pentas Seni / Juri Pidato"
+                  placeholder="Contoh: Juri Pentas Seni / Juri Pidato / Umum"
                   value={newJurySpecialty}
                   onChange={(e) => setNewJurySpecialty(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Keterangan bidang atau spesialisasi juri pada lembar sertifikat &amp; laporan penilaian.
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              {/* 3. Username & Password */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Username *</label>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Username Login *
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="juri_khusus"
+                    placeholder="Contoh: juri1"
                     value={newJuryUsername}
-                    onChange={(e) => setNewJuryUsername(e.target.value)}
-                    className="w-full p-2.5 rounded-lg border border-slate-300"
+                    onChange={(e) => setNewJuryUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_.-]/g, ''))}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 bg-slate-50/70 font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">Gunakan huruf kecil dan angka sederhana</p>
                 </div>
+
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Password *</label>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Password Akun *
+                  </label>
                   <input
                     type="password"
                     required
                     placeholder="Min 4 karakter"
                     value={newJuryPassword}
                     onChange={(e) => setNewJuryPassword(e.target.value)}
-                    className="w-full p-2.5 rounded-lg border border-slate-300"
+                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50/70 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">Minimal 4 karakter</p>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              {/* Informative Note */}
+              <div className="p-3 bg-emerald-50/70 rounded-xl border border-emerald-200/80 text-[11px] text-emerald-900 flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>
+                  Akun juri baru akan otomatis terdaftar di database Google Sheets (Sheet <strong>Users</strong>) dengan hak akses <code>role = jury</code>.
+                </span>
+              </div>
+
+              {/* Modal Actions Footer */}
+              <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-end gap-2.5 -mx-5 sm:-mx-6 -mb-5 sm:-mb-6 px-5 sm:px-6 py-3.5 bg-slate-50">
                 <button
                   type="button"
+                  disabled={isSubmittingJury}
                   onClick={() => setShowAddJuryModal(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-4 py-2 font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/70 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg"
+                  disabled={isSubmittingJury}
+                  className="px-5 py-2.5 font-bold text-white bg-gradient-to-r from-emerald-800 to-teal-800 hover:from-emerald-700 hover:to-teal-700 active:scale-98 rounded-xl shadow-md shadow-emerald-900/20 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Buat Akun Juri
+                  {isSubmittingJury ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                      <span>Menyimpan ke Database...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4 text-amber-300" />
+                      <span>Buat Akun Juri</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -3637,7 +3885,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold leading-tight">Tambah Cabang Lomba Baru</h3>
-                  <p className="text-xs text-emerald-200">Sub-Event: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event}</p>
+                  <p className="text-xs text-emerald-200">Event: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event}</p>
                 </div>
               </div>
               <button
@@ -3651,7 +3899,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
             <form onSubmit={handleCreateCategory} className="p-6 space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-800 mb-1">Sub-Event Target *</label>
+                <label className="block font-bold text-slate-800 mb-1">Event Target *</label>
                 <select
                   value={newCatEventId}
                   onChange={(e) => setNewCatEventId(e.target.value)}
@@ -3870,7 +4118,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <div className="min-w-0 flex-1">
                               <div className="font-bold text-xs truncate">{jury.nama}</div>
                               <div className="text-[10px] text-slate-500 truncate">
-                                {jury.jurySpecialty || `@${jury.username}`}
+                                {jury.jurySpecialty || jury.username}
                               </div>
                             </div>
                           </div>
@@ -4166,7 +4414,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <div className="min-w-0 flex-1">
                               <div className="font-bold text-xs truncate">{jury.nama}</div>
                               <div className="text-[10px] text-slate-500 truncate">
-                                {jury.jurySpecialty || `@${jury.username}`}
+                                {jury.jurySpecialty || jury.username}
                               </div>
                             </div>
                           </div>
@@ -4248,6 +4496,116 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs cursor-pointer"
               >
                 Ya, Hapus Cabang
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Akun Dewan Juri */}
+      {juryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-xs">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">
+                Hapus Akun Dewan Juri?
+              </h3>
+              <p className="text-xs text-slate-600 mt-1">
+                Apakah Anda yakin ingin menghapus akun dewan juri{' '}
+                <strong className="text-slate-900 font-semibold">{juryToDelete.nama}</strong>{' '}
+                (<span className="font-mono text-emerald-800 font-medium">{juryToDelete.username.replace(/^@+/, '')}</span>)?
+              </p>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+              <strong>Perhatian:</strong> Akun ini akan dihapus permanen dari sistem dan database Google Sheets. Seluruh riwayat penilaian yang pernah dimasukkan oleh juri ini juga akan ikut dihapus.
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingJury}
+                onClick={() => setJuryToDelete(null)}
+                className="flex-1 py-2.5 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingJury}
+                onClick={confirmDeleteJury}
+                className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeletingJury ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Menghapus...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Ya, Hapus Juri</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Peserta / Regu */}
+      {teamToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto shadow-xs">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-base font-bold text-slate-900">
+                Hapus Peserta / Regu?
+              </h3>
+              <p className="text-xs text-slate-600 mt-1">
+                Apakah Anda yakin ingin menghapus peserta{' '}
+                <strong className="text-slate-900 font-semibold">{teamToDelete.nama_regu}</strong>{' '}
+                ({teamToDelete.kelas_pangkalan})?
+              </p>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+              <strong>Perhatian:</strong> Seluruh nilai dewan juri dan vote publik untuk peserta ini akan ikut dihapus secara permanen.
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingTeam}
+                onClick={() => setTeamToDelete(null)}
+                className="flex-1 py-2.5 px-3 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingTeam}
+                onClick={confirmDeleteTeam}
+                className="flex-1 py-2.5 px-3 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeletingTeam ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Menghapus...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Ya, Hapus Peserta</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

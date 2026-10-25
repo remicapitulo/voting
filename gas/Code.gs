@@ -432,6 +432,7 @@ function doPost(e) {
         response = handleGetConfig(body.key);
         break;
       case 'manageCategory':
+      case 'purgeCategory':
         response = handleManageCategory(body);
         break;
       case 'manageTeam':
@@ -728,17 +729,65 @@ function handleManageCategory(data) {
   }
 
   var op = data.operation || 'create';
-  var idKategori = String(data.id_kategori || ('cat-' + new Date().getTime()));
+  var idKategori = String(data.id_kategori || ('cat-' + new Date().getTime())).trim();
+  var namaKategori = String(data.nama_kategori || '').trim();
+  var idEvent = String(data.id_event || '').trim();
   var rows = sheet.getDataRange().getValues();
 
-  if (op === 'delete') {
-    for (var r = 1; r < rows.length; r++) {
-      if (String(rows[r][0]) === idKategori) {
+  if (op === 'delete' || op === 'purge') {
+    var targetId = idKategori.toLowerCase();
+    var targetName = namaKategori.toLowerCase();
+    var targetEvent = idEvent.toLowerCase();
+    var deletedCount = 0;
+
+    // Loop dari baris paling bawah ke atas agar indeks baris sheet tidak tergeser saat deleteRow
+    for (var r = rows.length - 1; r >= 1; r--) {
+      var rowId = String(rows[r][0] || '').trim().toLowerCase();
+      var rowEvent = String(rows[r][1] || '').trim().toLowerCase();
+      var rowName = String(rows[r][2] || '').trim().toLowerCase();
+
+      var matchName = targetName && (rowName === targetName);
+      var matchId = targetId && (rowId === targetId);
+
+      // Cocok jika:
+      // 1. Nama kategori sama persis (misal 'Master Camp Chef')
+      // 2. Atau jika targetId sama persis DAN jika targetName ada maka nama juga cocok, atau targetName kosong
+      if (matchName || (matchId && (!targetName || rowName === targetName))) {
         sheet.deleteRow(r + 1);
-        return { status: 'success', message: 'Cabang lomba berhasil dihapus' };
+        deletedCount++;
       }
     }
-    return { status: 'error', message: 'Cabang lomba tidak ditemukan' };
+
+    if (deletedCount > 0) {
+      // Bersihkan juga nilai skor dan vote publik terkait kategori ini jika ada
+      try {
+        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+        if (scoreSheet) {
+          var sRows = scoreSheet.getDataRange().getValues();
+          for (var s = sRows.length - 1; s >= 1; s--) {
+            var sCatId = String(sRows[s][4] || '').trim().toLowerCase();
+            if (sCatId === targetId) {
+              scoreSheet.deleteRow(s + 1);
+            }
+          }
+        }
+        var voteSheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+        if (voteSheet) {
+          var vRows = voteSheet.getDataRange().getValues();
+          for (var v = vRows.length - 1; v >= 1; v--) {
+            var vCatId = String(vRows[v][4] || '').trim().toLowerCase();
+            if (vCatId === targetId) {
+              voteSheet.deleteRow(v + 1);
+            }
+          }
+        }
+      } catch (cleanErr) {
+        Logger.log('Score/vote cleanup warning: ' + cleanErr);
+      }
+
+      return { status: 'success', message: 'Cabang lomba (' + (namaKategori || idKategori) + ') sebanyak ' + deletedCount + ' baris berhasil dihapus permanen dari Google Sheets.' };
+    }
+    return { status: 'error', message: 'Cabang lomba tidak ditemukan di sheet Categories Google Sheets.' };
   }
 
   ensureHeaderExists(sheet, 'assigned_juries');
@@ -762,11 +811,37 @@ function handleManageCategory(data) {
   };
 
   if (op === 'update') {
+    // 1. Cari berdasarkan ID
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === idKategori) {
+      if (String(rows[i][0]).trim().toLowerCase() === idKategori.toLowerCase()) {
         updateRowByHeaders(sheet, i + 1, catObj);
         return { status: 'success', message: 'Cabang lomba berhasil diperbarui' };
       }
+    }
+    // 2. Jika ID tidak cocok, cari berdasarkan nama kategori di event yang sama
+    if (namaKategori) {
+      for (var j = 1; j < rows.length; j++) {
+        var rEvent = String(rows[j][1] || '').trim().toLowerCase();
+        var rName = String(rows[j][2] || '').trim().toLowerCase();
+        if (rName === namaKategori.toLowerCase() && (!idEvent || rEvent === idEvent.toLowerCase())) {
+          updateRowByHeaders(sheet, j + 1, catObj);
+          return { status: 'success', message: 'Cabang lomba berhasil diperbarui' };
+        }
+      }
+    }
+    return { status: 'error', message: 'Cabang lomba tidak ditemukan untuk diperbarui' };
+  }
+
+  // Operasi Create: Cek apakah nama atau id kategori sudah pernah ada agar tidak timbul baris ganda
+  for (var k = 1; k < rows.length; k++) {
+    var exId = String(rows[k][0] || '').trim().toLowerCase();
+    var exEvent = String(rows[k][1] || '').trim().toLowerCase();
+    var exName = String(rows[k][2] || '').trim().toLowerCase();
+
+    if ((exId === idKategori.toLowerCase()) || 
+        (namaKategori && exName === namaKategori.toLowerCase() && (!idEvent || exEvent === idEvent.toLowerCase()))) {
+      updateRowByHeaders(sheet, k + 1, catObj);
+      return { status: 'success', message: 'Cabang lomba sudah ada, data berhasil disinkronkan' };
     }
   }
 
@@ -838,44 +913,125 @@ function handleManageJury(data) {
   var op = data.operation || 'create';
   var rows = sheet.getDataRange().getValues();
 
+  function norm(str) {
+    if (!str) return '';
+    return String(str).trim().toLowerCase().replace(/^@+/, '');
+  }
+
+  var targetId = norm(data.id || data.id_jury);
+  var targetUser = norm(data.username);
+  var targetName = norm(data.nama);
+
   if (op === 'delete') {
-    for (var r = 1; r < rows.length; r++) {
-      if (String(rows[r][0]) === String(data.id)) {
+    var deleted = false;
+    var deletedUsernames = [];
+    var deletedIds = [];
+
+    // Loop dari bawah ke atas agar indeks baris aman saat deleteRow
+    for (var r = rows.length - 1; r >= 1; r--) {
+      var rowId = norm(rows[r][0]);
+      var rowUsername = norm(rows[r][1]);
+      var rowName = norm(rows[r][3]);
+      var rowRole = norm(rows[r][4]);
+
+      // Fleksibilitas pencocokan:
+      // 1. ID sama persis atau sama tanpa prefix 'user-' atau 'jury-'
+      var idMatch = targetId && (
+        rowId === targetId ||
+        rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, '')
+      );
+      // 2. Username sama (dengan atau tanpa tanda @)
+      var userMatch = targetUser && (
+        rowUsername === targetUser ||
+        rowUsername === targetId.replace(/^(user|jury)-/, '') ||
+        rowId.replace(/^(user|jury)-/, '') === targetUser
+      );
+      // 3. ID di frontend sama dengan Username di sheet (atau sebaliknya)
+      var crossMatch = (targetId && (rowUsername === targetId || rowUsername === targetId.replace(/^(user|jury)-/, ''))) ||
+                       (targetUser && (rowId === targetUser || rowId.replace(/^(user|jury)-/, '') === targetUser));
+      // 4. Nama lengkap sama
+      var nameMatch = targetName && (rowName === targetName);
+
+      if (idMatch || userMatch || crossMatch || nameMatch) {
+        if (rowUsername) deletedUsernames.push(rowUsername);
+        if (rowId) deletedIds.push(rowId);
         sheet.deleteRow(r + 1);
-        return { status: 'success', message: 'Akun juri berhasil dihapus' };
+        deleted = true;
       }
     }
-    return { status: 'error', message: 'Akun juri tidak ditemukan' };
+
+    if (deleted) {
+      // Bersihkan juga nilai di Jury_Scores yang terkait dengan juri ini
+      try {
+        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+        if (scoreSheet) {
+          var sRows = scoreSheet.getDataRange().getValues();
+          for (var s = sRows.length - 1; s >= 1; s--) {
+            var sJuryId = norm(sRows[s][1]);
+            var sJuryName = norm(sRows[s][2]);
+            if ((targetId && sJuryId === targetId) ||
+                (targetUser && sJuryId === targetUser) ||
+                (targetName && sJuryName === targetName) ||
+                deletedIds.indexOf(sJuryId) >= 0 ||
+                deletedUsernames.indexOf(sJuryId) >= 0) {
+              scoreSheet.deleteRow(s + 1);
+            }
+          }
+        }
+      } catch (scoreErr) {
+        Logger.log('Error cleaning jury scores: ' + scoreErr);
+      }
+      return { status: 'success', message: 'Akun juri berhasil dihapus permanen dari Google Sheets' };
+    }
+    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets (ID: ' + targetId + ', Username: ' + targetUser + ')' };
   }
 
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === String(data.id)) {
+      var rowId = norm(rows[i][0]);
+      var rowUsername = norm(rows[i][1]);
+      var rowName = norm(rows[i][3]);
+
+      var isMatch = (targetId && (rowId === targetId || rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, ''))) ||
+                    (targetUser && (rowUsername === targetUser || rowUsername === targetId.replace(/^(user|jury)-/, '') || rowId.replace(/^(user|jury)-/, '') === targetUser)) ||
+                    (targetName && rowName === targetName);
+
+      if (isMatch) {
         var updateObj = {
-          username: String(data.username).trim().toLowerCase(),
-          nama: data.nama,
-          jurySpecialty: data.jurySpecialty || ''
+          username: targetUser,
+          nama: String(data.nama || ''),
+          jurySpecialty: String(data.jurySpecialty || '')
         };
-        if (data.password) updateObj.password = data.password;
+        if (data.password) updateObj.password = String(data.password);
         updateRowByHeaders(sheet, i + 1, updateObj);
-        return { status: 'success', message: 'Data juri berhasil diperbarui' };
+        return { status: 'success', message: 'Data juri berhasil diperbarui di Google Sheets' };
       }
+    }
+    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets' };
+  }
+
+  // Create new jury
+  // 1. Verify username uniqueness in sheet
+  for (var u = 1; u < rows.length; u++) {
+    var existingUser = norm(rows[u][1]);
+    if (existingUser === targetUser) {
+      return { status: 'error', message: 'Username ' + targetUser + ' sudah digunakan di database Google Sheets' };
     }
   }
 
-  var newId = 'jury-' + new Date().getTime();
+  var newId = String(data.id || data.id_jury || ('jury-' + new Date().getTime()));
   appendRowByHeaders(sheet, {
     id: newId,
-    username: String(data.username).trim().toLowerCase(),
-    password: data.password,
-    nama: data.nama,
+    username: targetUser,
+    password: String(data.password || '123456'),
+    nama: String(data.nama || ''),
     role: 'juri',
     emailOrWa: '',
-    jurySpecialty: data.jurySpecialty || '',
-    created_at: new Date().toISOString()
+    jurySpecialty: String(data.jurySpecialty || 'Dewan Juri Khusus'),
+    created_at: String(data.created_at || new Date().toISOString())
   });
 
-  return { status: 'success', message: 'Akun juri berhasil dibuat' };
+  return { status: 'success', message: 'Akun juri berhasil dibuat di Google Sheets', id: newId };
 }
 
 function handleManageEvent(data) {

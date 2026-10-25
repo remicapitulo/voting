@@ -126,7 +126,7 @@ export async function generateRecapPDF(
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
   doc.text(
-    `SUB-EVENT: ${event.nama_event.toUpperCase()} · TAHUN AJARAN ${event.tahun || '2026/2027'}`,
+    `EVENT: ${event.nama_event.toUpperCase()} · TAHUN AJARAN ${event.tahun || '2026/2027'}`,
     pageWidth / 2,
     40,
     { align: 'center' }

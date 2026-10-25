@@ -158,7 +158,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   </span>
                 </h2>
                 <p className="text-[11px] text-slate-400">
-                  {category.nama_kategori} · Sub-Event {event.nama_event}
+                  {category.nama_kategori} · Event {event.nama_event}
                 </p>
               </div>
             </div>
@@ -588,7 +588,7 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   BERITA ACARA REKAPITULASI HASIL PENILAIAN &amp; E-VOTING
                 </h2>
                 <p className="text-[11px] font-medium text-slate-600 mt-1 uppercase">
-                  SUB-EVENT: {event.nama_event} · TAHUN AJARAN {event.tahun || '2026/2027'}
+                  EVENT: {event.nama_event} · TAHUN AJARAN {event.tahun || '2026/2027'}
                 </p>
               </div>
 

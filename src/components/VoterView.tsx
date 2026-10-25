@@ -235,7 +235,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
 
     if (isSubEventClosed) {
       const msg = closedStatus.reason === 'not_active'
-        ? `Sub-Event ${currentSubEvent.nama_event} saat ini berstatus DITUTUP oleh panitia. Hak voting tidak dapat digunakan.`
+        ? `Event ${currentSubEvent.nama_event} saat ini berstatus DITUTUP oleh panitia. Hak voting tidak dapat digunakan.`
         : `Voting telah ditutup. Batas waktu untuk ${currentSubEvent.nama_event} telah berakhir pada ${formattedDeadline}.`;
       setNotification({
         type: 'error',
@@ -271,7 +271,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
       setNotification({
         type: 'error',
         message: closedStatus.reason === 'not_active'
-          ? 'Gagal: Sub-Event sedang ditutup oleh panitia.'
+          ? 'Gagal: Event sedang ditutup oleh panitia.'
           : 'Gagal: Periode voting telah berakhir dan sistem saat ini terkunci.'
       });
       setIsSubmitting(false);
@@ -365,10 +365,10 @@ export const VoterView: React.FC<VoterViewProps> = ({
         <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200 shadow-xs">
           <Lock className="w-8 h-8" />
         </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Semua Sub-Event Sedang Ditutup</h2>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Semua Event Sedang Ditutup</h2>
         <p className="text-sm text-slate-600 mb-6 leading-relaxed max-w-lg mx-auto">
-          Saat ini belum ada sub-event pemungutan suara yang dibuka oleh Panitia SMPIT Pondok Duta.
-          Seluruh sub-event sedang dalam status dikunci. Silakan menunggu informasi resmi dari panitia.
+          Saat ini belum ada event pemungutan suara yang dibuka oleh Panitia SMPIT Pondok Duta.
+          Seluruh event sedang dalam status dikunci. Silakan menunggu informasi resmi dari panitia.
         </p>
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-100 text-xs font-semibold text-slate-700">
           <Clock className="w-4 h-4 text-emerald-700" />
@@ -386,7 +386,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-emerald-800" />
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-              Pilihan Sub-Event:
+              Pilihan Event:
             </span>
           </div>
 
@@ -429,7 +429,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
         
         <div className="relative z-10 max-w-3xl">
           <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-amber-300 mb-2">
-            <span>Sub-Event: {currentSubEvent.kode_event || currentSubEvent.nama_event}</span>
+            <span>Event: {currentSubEvent.kode_event || currentSubEvent.nama_event}</span>
             <span aria-hidden="true">·</span>
             <span>SMPIT Pondok Duta</span>
             <span aria-hidden="true">·</span>
@@ -480,7 +480,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
           <div className="text-xs sm:text-sm">
             <div className="font-bold">PENJURIAN & VOTING TELAH RESMI DITUTUP (BATAS WAKTU HABIS)</div>
             <p className="mt-0.5 leading-relaxed">
-              Batas waktu untuk Sub-Event <strong>{currentSubEvent.nama_event}</strong> telah berakhir pada{' '}
+              Batas waktu untuk Event <strong>{currentSubEvent.nama_event}</strong> telah berakhir pada{' '}
               <strong className="underline">{formattedDeadline}</strong>. Sesuai ketentuan panitia, sistem voting saat ini resmi terkunci dan tidak dapat menerima dukungan baru.
             </p>
           </div>
@@ -816,7 +816,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
                       className="w-full py-2.5 px-3 text-xs font-medium text-slate-400 bg-slate-100 rounded-lg cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
                       <Lock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{closedStatus.reason === 'not_active' ? 'Sub-Event Ditutup' : 'Voting Ditutup (Waktu Habis)'}</span>
+                      <span>{closedStatus.reason === 'not_active' ? 'Event Ditutup' : 'Voting Ditutup (Waktu Habis)'}</span>
                     </button>
                   ) : isQuotaSatisfied ? (
                     <button
@@ -861,7 +861,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs">
               <div className="flex justify-between py-1 border-b border-slate-200">
-                <span className="text-slate-500">Sub-Event:</span>
+                <span className="text-slate-500">Event:</span>
                 <span className="font-semibold text-slate-900">{currentSubEvent.nama_event}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-200">

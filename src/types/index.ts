@@ -43,7 +43,7 @@ export interface CategoryModel {
 
 export interface TeamModel {
   id_team: string;
-  id_event: string; // Terikat ke Sub-Event tertentu (Duta Camp, PHBI, PHBN)
+  id_event: string; // Terikat ke Event tertentu (Duta Camp, PHBI, PHBN)
   nama_regu: string; // Nama Regu/Kelompok ATAU Nama Peserta Perorangan
   tipe_partisipasi?: 'Group' | 'Individu';
   kategori_regu: 'Putra' | 'Putri';

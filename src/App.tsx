@@ -38,7 +38,7 @@ export default function App() {
   const [hasGasConfigured, setHasGasConfigured] = useState<boolean>(Boolean(apiService.getGasUrl()));
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Active sub-event currently selected
+  // Active event currently selected
   const activeEvent = appState.events.find(e => e.id_event === selectedEventId) || appState.event;
 
   // Print Report Modal State
@@ -84,11 +84,11 @@ export default function App() {
     refreshData(true);
   }, []);
 
-  // When sub-event is changed, switch active event and update category
+  // When event is changed, switch active event and update category
   const handleSelectEvent = (eventId: string) => {
     setSelectedEventId(eventId);
     apiService.setActiveEvent(eventId);
-    // Find categories of newly selected sub-event and auto select the first one
+    // Find categories of newly selected event and auto select the first one
     const newCategories = appState.categories.filter(c => c.id_event === eventId);
     if (newCategories.length > 0) {
       setSelectedCategoryId(newCategories[0].id_kategori);
@@ -96,7 +96,7 @@ export default function App() {
     refreshData();
   };
 
-  // Ensure selectedCategoryId remains valid for the active sub-event
+  // Ensure selectedCategoryId remains valid for the active event
   useEffect(() => {
     const eventCats = appState.categories.filter(c => !selectedEventId || c.id_event === selectedEventId);
     const validCats = eventCats.length > 0 ? eventCats : appState.categories;

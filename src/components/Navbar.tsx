@@ -378,7 +378,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="flex-1 min-w-0">
                 <h4 className="text-base font-bold text-slate-900 truncate">{currentUser.nama}</h4>
                 <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <span className="font-mono text-emerald-800">@{currentUser.username}</span>
+                  <span className="font-mono text-emerald-800">{currentUser.username}</span>
                   <span aria-hidden="true">·</span>
                   <span className="font-semibold text-slate-700 capitalize">
                     {currentUser.role === 'admin'

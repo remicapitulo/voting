@@ -9,7 +9,7 @@ export const INITIAL_EVENTS: EventModel[] = [];
 
 export const INITIAL_EVENT: EventModel = {
   id_event: '',
-  nama_event: 'Memuat Sub-Event Database...',
+  nama_event: 'Memuat Event Database...',
   kode_event: '',
   deskripsi: 'Menghubungkan ke database...',
   tahun: '2026',

@@ -160,6 +160,35 @@ class ApiService {
       localStorage.setItem(STORAGE_KEYS.WEIGHTS, JSON.stringify({ jury: 70, public: 30 }));
     }
 
+    // Bersihkan awalan '@' jika ada pada data cache pengguna lama
+    try {
+      const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+      if (rawUsers) {
+        const parsed: User[] = JSON.parse(rawUsers);
+        if (Array.isArray(parsed)) {
+          let changed = false;
+          const cleaned = parsed.map(u => {
+            if (u.username && u.username.startsWith('@')) {
+              changed = true;
+              return { ...u, username: u.username.replace(/^@+/, '') };
+            }
+            return u;
+          });
+          if (changed) {
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(cleaned));
+          }
+        }
+      }
+      const rawCurr = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      if (rawCurr) {
+        const curr: User = JSON.parse(rawCurr);
+        if (curr && curr.username && curr.username.startsWith('@')) {
+          curr.username = curr.username.replace(/^@+/, '');
+          localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(curr));
+        }
+      }
+    } catch {}
+
     // Auto-sync dari Database Google Sheets jika URL GAS telah terkonfigurasi
     if (this.gasUrl) {
       setTimeout(() => {
@@ -291,13 +320,27 @@ class ApiService {
       }
 
       // Normalisasi & Deduplikasi Categories dari Database
+      const seenCatKeys = new Set<string>();
       const seenCatIds = new Set<string>();
       const categories: CategoryModel[] = [];
       for (const c of rawData.categories || []) {
         const id = String(c.id_kategori || '').trim();
-        if (id && !seenCatIds.has(id)) {
-          seenCatIds.add(id);
-          let kriteriaArr: string[] = [];
+        const nama = String(c.nama_kategori || '').trim();
+        const eventId = String(c.id_event || '').trim();
+        if (!id || !nama) continue;
+
+        // Composite key prevents dropping distinct category rows that share the same ID in Google Sheets
+        const compKey = `${id}__${eventId}__${nama.toLowerCase()}`;
+        if (seenCatKeys.has(compKey)) continue;
+        seenCatKeys.add(compKey);
+
+        let finalId = id;
+        if (seenCatIds.has(finalId)) {
+          finalId = `${id}-dup-${categories.length + 1}`;
+        }
+        seenCatIds.add(finalId);
+
+        let kriteriaArr: string[] = [];
           if (Array.isArray(c.kriteria)) {
             kriteriaArr = c.kriteria.map((k: any) => String(k).trim()).filter(Boolean);
           } else if (typeof c.kriteria === 'string' && c.kriteria.trim().length > 0) {
@@ -360,7 +403,7 @@ class ApiService {
           }
 
           categories.push({
-            id_kategori: id,
+            id_kategori: finalId,
             id_event: String(c.id_event || ''),
             nama_kategori: String(c.nama_kategori || ''),
             tipe: String(c.tipe || 'Lomba'),
@@ -375,7 +418,6 @@ class ApiService {
             assigned_juries: assignedJuriesArr
           });
         }
-      }
 
       // Normalisasi & Deduplikasi Teams dari Database
       const seenTeamIds = new Set<string>();
@@ -425,7 +467,8 @@ class ApiService {
       const seenUsernames = new Set<string>();
       const users: User[] = [];
       for (const u of rawData.users || []) {
-        const uname = String(u.username || '').trim().toLowerCase();
+        // Hapus tanda '@' jika ada di spreadsheet agar selalu konsisten di database lokal
+        const uname = String(u.username || '').trim().toLowerCase().replace(/^@+/, '');
         if (uname && !seenUsernames.has(uname)) {
           seenUsernames.add(uname);
           let emailWa = String(u.emailOrWa || '').trim();
@@ -439,8 +482,11 @@ class ApiService {
             specialty = '';
           }
 
+          const rawId = String(u.id || '').trim();
+          const stableId = rawId || `user-${uname}`;
+
           users.push({
-            id: String(u.id || `user-${Date.now()}`),
+            id: stableId,
             username: uname,
             nama: String(u.nama || ''),
             role: u.role || 'voter',
@@ -613,7 +659,7 @@ class ApiService {
       return {
         success: true,
         message: syncRes.success
-          ? `Koneksi berhasil! ${syncRes.counts?.events || 0} Sub-Event, ${syncRes.counts?.categories || 0} Cabang Lomba, ${syncRes.counts?.teams || 0} Peserta berhasil dimuat langsung dari database.`
+          ? `Koneksi berhasil! ${syncRes.counts?.events || 0} Event, ${syncRes.counts?.categories || 0} Cabang Lomba, ${syncRes.counts?.teams || 0} Peserta berhasil dimuat langsung dari database.`
           : (data.message || 'Koneksi ke Google Apps Script berhasil!')
       };
     } catch (err: any) {
@@ -651,43 +697,39 @@ class ApiService {
   }
 
   public getActiveEvent(): EventModel {
+    const raw = localStorage.getItem(STORAGE_KEYS.EVENT);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.id_event) {
+          const events = this.getEvents();
+          const match = events.find(e => e.id_event === parsed.id_event);
+          if (match) return match;
+        }
+      } catch {}
+    }
     const events = this.getEvents();
-    const active = events.find(e => e.status_aktif) || events[0] || INITIAL_EVENT;
-    return active;
+    return events[0] || INITIAL_EVENT;
   }
 
   public setActiveEvent(id_event: string): { success: boolean; message: string } {
     const events = this.getEvents();
-    let selectedEvent: EventModel | null = null;
-    const updatedEvents = events.map(ev => {
-      if (ev.id_event === id_event) {
-        selectedEvent = { ...ev, status_aktif: true };
-        return selectedEvent;
-      }
-      return ev; // Maintain all other events active so users can vote across different events
-    });
+    const target = events.find(ev => ev.id_event === id_event);
 
-    if (!selectedEvent) {
-      return { success: false, message: 'Sub Event tidak ditemukan' };
+    if (!target) {
+      return { success: false, message: 'Event tidak ditemukan' };
     }
 
-    localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(updatedEvents));
-    localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(selectedEvent));
-
-    if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'setActiveEvent', id_event })
-      }).catch(console.warn);
-    }
+    // Hanya menyimpan event yang dipilih ke storage tanpa mengubah status_aktif/kunci
+    localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(target));
 
     return {
       success: true,
-      message: `Sub-Event "${(selectedEvent as EventModel).nama_event}" telah dipilih.`
+      message: `Event "${target.nama_event}" telah dipilih.`
     };
   }
 
-  public toggleEventStatus(id_event: string, isActive: boolean): { success: boolean; message: string } {
+  public async toggleEventStatus(id_event: string, isActive: boolean): Promise<{ success: boolean; message: string }> {
     const events = this.getEvents();
     let eventName = '';
     const updated = events.map(ev => {
@@ -707,10 +749,14 @@ class ApiService {
 
     if (this.gasUrl) {
       const targetEvent = updated.find(e => e.id_event === id_event);
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'toggleEventStatus', id_event, is_active: isActive })
-      }).catch(console.warn);
+      try {
+        await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'toggleEventStatus', id_event, is_active: isActive })
+        });
+      } catch (e) {
+        console.warn('Gagal sinkron toggleEventStatus ke Google Sheets:', e);
+      }
 
       if (targetEvent) {
         fetch(this.gasUrl, {
@@ -727,7 +773,7 @@ class ApiService {
 
     return {
       success: true,
-      message: `Sub-Event "${eventName || id_event}" berhasil ${isActive ? 'DIBUKA (Aktif)' : 'DITUTUP (Non-Aktif)'}.`
+      message: `Event "${eventName || id_event}" berhasil ${isActive ? 'DIBUKA (Aktif)' : 'DITUTUP (Terkunci)'}.`
     };
   }
 
@@ -798,7 +844,7 @@ class ApiService {
     return {
       success: true,
       event: eventObj,
-      message: `Sub Event "${eventObj.nama_event}" berhasil dibuat.`
+      message: `Event "${eventObj.nama_event}" berhasil dibuat.`
     };
   }
 
@@ -818,9 +864,9 @@ class ApiService {
           body: JSON.stringify({ action: 'manageEvent', operation: 'update', ...updated })
         }).catch(console.warn);
       }
-      return { success: true, message: `Sub-Event "${updated.nama_event}" berhasil diperbarui.` };
+      return { success: true, message: `Event "${updated.nama_event}" berhasil diperbarui.` };
     }
-    return { success: false, message: 'Sub Event tidak ditemukan.' };
+    return { success: false, message: 'Event tidak ditemukan.' };
   }
 
   public isEventExpired(eventOrId?: EventModel | string): boolean {
@@ -902,7 +948,7 @@ class ApiService {
   }
 
   public async login(username: string, password: string): Promise<{ success: boolean; user?: User; message: string }> {
-    const cleanUser = username.trim().toLowerCase();
+    const cleanUser = username.trim().toLowerCase().replace(/^@+/, '');
     const cleanPass = password.trim();
 
     // If GAS URL is configured, optionally try GAS first
@@ -1376,23 +1422,28 @@ class ApiService {
     return { success: false, message: 'Cabang lomba tidak ditemukan.' };
   }
 
-  public deleteCategory(categoryId: string): { success: boolean; message: string } {
+  public async deleteCategory(categoryId: string, categoryName?: string, eventId?: string): Promise<{ success: boolean; message: string }> {
     const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
     const target = categories.find(c => c.id_kategori === categoryId);
-    if (!target) {
+    const finalName = target?.nama_kategori || categoryName || '';
+    const finalEventId = target?.id_event || eventId || '';
+
+    if (!target && !categoryName) {
       return { success: false, message: 'Cabang lomba tidak ditemukan.' };
     }
 
-    // Ensure at least 1 category remains for the event
-    const remainingInEvent = categories.filter(c => c.id_event === target.id_event && c.id_kategori !== categoryId);
-    if (remainingInEvent.length === 0) {
-      return {
-        success: false,
-        message: 'Tidak dapat menghapus cabang lomba terakhir pada sub-event ini. Minimal harus ada 1 cabang lomba aktif.'
-      };
+    // Ensure at least 1 category remains for the event if target exists
+    if (target) {
+      const remainingInEvent = categories.filter(c => c.id_event === target.id_event && c.id_kategori !== categoryId);
+      if (remainingInEvent.length === 0) {
+        return {
+          success: false,
+          message: 'Tidak dapat menghapus cabang lomba terakhir pada event ini. Minimal harus ada 1 cabang lomba aktif.'
+        };
+      }
     }
 
-    const filtered = categories.filter(c => c.id_kategori !== categoryId);
+    const filtered = categories.filter(c => c.id_kategori !== categoryId && (!finalName || c.nama_kategori.toLowerCase() !== finalName.toLowerCase()));
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(filtered));
 
     // Remove jury scores and public votes belonging to this category
@@ -1402,48 +1453,147 @@ class ApiService {
     const votes: PublicVote[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.PUBLIC_VOTES) || '[]');
     localStorage.setItem(STORAGE_KEYS.PUBLIC_VOTES, JSON.stringify(votes.filter(v => v.id_kategori !== categoryId)));
 
+    const cleanId = categoryId.includes('-dup-') ? categoryId.split('-dup-')[0] : categoryId;
+
     if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'manageCategory', operation: 'delete', id_kategori: categoryId })
-      }).catch(console.warn);
+      try {
+        await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageCategory',
+            operation: 'delete',
+            id_kategori: cleanId,
+            nama_kategori: finalName,
+            id_event: finalEventId
+          })
+        });
+        // Sinkronisasi data cloud setelah penghapusan
+        await this.syncFromDatabase().catch(console.warn);
+      } catch (e) {
+        console.warn('Gagal menghapus cabang lomba di Google Sheets:', e);
+      }
     }
 
-    return { success: true, message: `Cabang lomba "${target.nama_kategori}" beserta data skor terkait berhasil dihapus.` };
+    return { success: true, message: `Cabang lomba "${finalName || categoryId}" beserta data skor terkait berhasil dihapus permanen.` };
   }
 
-  public addJury(juryData: { nama: string; username: string; password: string; jurySpecialty: string }): { success: boolean; message: string } {
-    const users: User[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    if (users.some(u => u.username.toLowerCase() === juryData.username.toLowerCase().trim())) {
-      return { success: false, message: 'Username juri sudah digunakan' };
+  public async purgeCategoryFromDatabase(categoryId: string, categoryName: string, eventId?: string): Promise<{ success: boolean; message: string }> {
+    const cleanId = categoryId.includes('-dup-') ? categoryId.split('-dup-')[0] : categoryId;
+
+    // 1. Bersihkan dari local state
+    const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
+    const filtered = categories.filter(c => 
+      c.id_kategori !== categoryId && 
+      c.id_kategori !== cleanId &&
+      (!categoryName || c.nama_kategori.toLowerCase() !== categoryName.toLowerCase())
+    );
+    localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(filtered));
+
+    // 2. Bersihkan langsung dari Google Sheets via GAS
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageCategory',
+            operation: 'delete',
+            id_kategori: cleanId,
+            nama_kategori: categoryName,
+            id_event: eventId || ''
+          })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          // Muat ulang data terbaru dari cloud spreadsheet
+          await this.syncFromDatabase().catch(console.warn);
+          return { success: true, message: json.message || `Data "${categoryName}" berhasil dibersihkan permanen dari Google Sheets.` };
+        }
+      } catch (err: any) {
+        return { success: false, message: `Gagal membersihkan data dari Google Sheets: ${err.message}` };
+      }
     }
+
+    return { success: true, message: `Data "${categoryName}" berhasil dihapus dari sistem lokal.` };
+  }
+
+  public async addJury(juryData: { nama: string; username: string; password: string; jurySpecialty: string }): Promise<{ success: boolean; message: string }> {
+    const cleanUser = juryData.username.trim().toLowerCase().replace(/^@/, '');
+    const cleanName = juryData.nama.trim();
+    const cleanPass = juryData.password.trim();
+    const cleanSpecialty = (juryData.jurySpecialty || '').trim();
+
+    if (!cleanName) {
+      return { success: false, message: 'Nama lengkap & gelar juri wajib diisi.' };
+    }
+    if (!cleanUser) {
+      return { success: false, message: 'Username juri wajib diisi.' };
+    }
+    if (!cleanPass) {
+      return { success: false, message: 'Password juri wajib diisi.' };
+    }
+    if (cleanPass.length < 4) {
+      return { success: false, message: 'Password juri minimal 4 karakter.' };
+    }
+
+    const users: User[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    if (users.some(u => u.username.toLowerCase() === cleanUser)) {
+      return { success: false, message: `Username "${cleanUser}" sudah digunakan oleh akun lain.` };
+    }
+
     const newJury: User = {
       id: `jury-${Date.now()}`,
-      username: juryData.username.trim().toLowerCase(),
-      nama: juryData.nama.trim(),
+      username: cleanUser,
+      nama: cleanName,
       role: 'juri',
-      jurySpecialty: juryData.jurySpecialty.trim(),
-      password: juryData.password.trim(),
+      jurySpecialty: cleanSpecialty || 'Dewan Juri Khusus',
+      password: cleanPass,
       created_at: new Date().toISOString()
     };
+
+    // Sinkronkan ke Google Sheets terlebih dahulu jika terkoneksi
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageJury',
+            operation: 'create',
+            id: newJury.id,
+            id_jury: newJury.id,
+            username: newJury.username,
+            password: newJury.password,
+            nama: newJury.nama,
+            role: 'juri',
+            emailOrWa: '',
+            jurySpecialty: newJury.jurySpecialty,
+            created_at: newJury.created_at
+          })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.status === 'error') {
+            return { success: false, message: json.message || 'Gagal menyimpan akun juri ke Google Sheets.' };
+          }
+          if (json && json.id) {
+            newJury.id = json.id;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Gagal sinkron buat juri ke Google Sheets:', err);
+      }
+    }
+
     users.push(newJury);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
 
-    if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'manageJury', ...newJury })
-      }).catch(console.warn);
-    }
-
-    return { success: true, message: `Akun Dewan Juri "${newJury.nama}" berhasil dibuat.` };
+    return { success: true, message: `Akun Dewan Juri "${newJury.nama}" (${newJury.username}) berhasil dibuat dan tersimpan di database!` };
   }
 
-  public updateJury(juryData: { id: string; nama: string; username: string; password?: string; jurySpecialty: string }): { success: boolean; message: string } {
+  public async updateJury(juryData: { id: string; nama: string; username: string; password?: string; jurySpecialty: string }): Promise<{ success: boolean; message: string }> {
     const users: User[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
     const idx = users.findIndex(u => u.id === juryData.id);
     if (idx >= 0) {
-      const cleanUsername = juryData.username.trim().toLowerCase();
+      const cleanUsername = juryData.username.trim().toLowerCase().replace(/^@/, '');
       const conflict = users.some(u => u.id !== juryData.id && u.username.toLowerCase() === cleanUsername);
       if (conflict) {
         return { success: false, message: `Username "${cleanUsername}" sudah digunakan oleh pengguna lain.` };
@@ -1458,10 +1608,23 @@ class ApiService {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
 
       if (this.gasUrl) {
-        fetch(this.gasUrl, {
-          method: 'POST',
-          body: JSON.stringify({ action: 'manageJury', operation: 'update', ...users[idx] })
-        }).catch(console.warn);
+        try {
+          await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'manageJury',
+              operation: 'update',
+              id: juryData.id,
+              id_jury: juryData.id,
+              username: cleanUsername,
+              nama: users[idx].nama,
+              password: users[idx].password,
+              jurySpecialty: users[idx].jurySpecialty
+            })
+          });
+        } catch (err) {
+          console.warn('Gagal memperbarui juri di Google Sheets:', err);
+        }
       }
 
       return { success: true, message: `Data akun Dewan Juri "${users[idx].nama}" berhasil diperbarui.` };
@@ -1469,24 +1632,83 @@ class ApiService {
     return { success: false, message: 'Akun juri tidak ditemukan.' };
   }
 
-  public deleteJury(juryId: string): { success: boolean; message: string } {
+  public async deleteJury(juryId: string, juryUsername?: string, juryNama?: string): Promise<{ success: boolean; message: string }> {
+    const cleanId = String(juryId || '').trim();
+    const cleanUsername = String(juryUsername || '').trim().toLowerCase().replace(/^@+/, '');
+    const cleanName = String(juryNama || '').trim().toLowerCase();
+
     const users: User[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    const target = users.find(u => u.id === juryId);
-    const filtered = users.filter(u => u.id !== juryId);
+    const target = users.find(u => {
+      const uNorm = u.username.trim().toLowerCase().replace(/^@+/, '');
+      const nameNorm = u.nama.trim().toLowerCase();
+      return (cleanId && u.id === cleanId) ||
+             (cleanUsername && uNorm === cleanUsername) ||
+             (cleanName && nameNorm === cleanName);
+    });
+
+    const targetUser = cleanUsername || target?.username?.replace(/^@+/, '') || '';
+    const targetName = target?.nama || juryNama || '';
+    const finalId = cleanId || target?.id || (targetUser ? `user-${targetUser}` : '');
+
+    // Hapus dari data pengguna lokal
+    const filtered = users.filter(u => {
+      const uNorm = u.username.trim().toLowerCase().replace(/^@+/, '');
+      const nameNorm = u.nama.trim().toLowerCase();
+      if (finalId && u.id === finalId) return false;
+      if (targetUser && uNorm === targetUser) return false;
+      if (targetName && nameNorm === targetName.toLowerCase()) return false;
+      return true;
+    });
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
 
-    // Also remove scores given by this jury
+    // Hapus juga nilai juri lokal yang pernah diisi oleh akun ini
     const scores: JuryScore[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.JURY_SCORES) || '[]');
-    localStorage.setItem(STORAGE_KEYS.JURY_SCORES, JSON.stringify(scores.filter(s => s.id_jury !== juryId)));
+    localStorage.setItem(STORAGE_KEYS.JURY_SCORES, JSON.stringify(
+      scores.filter(s => {
+        if (finalId && s.id_jury === finalId) return false;
+        if (targetUser && (s.id_jury === targetUser || s.id_jury === `user-${targetUser}`)) return false;
+        if (targetName && s.jury_name === targetName) return false;
+        return true;
+      })
+    ));
 
+    // Sinkronisasi hapus permanen ke Google Sheets
+    let gasSuccess = false;
+    let gasMessage = '';
     if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'manageJury', operation: 'delete', id_jury: juryId })
-      }).catch(console.warn);
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageJury',
+            operation: 'delete',
+            id: finalId,
+            id_jury: finalId,
+            username: targetUser,
+            nama: targetName
+          })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.status === 'success') {
+            gasSuccess = true;
+            gasMessage = json.message || 'Berhasil dihapus dari Google Sheets.';
+          } else if (json && json.status === 'error') {
+            console.warn('Google Sheets delete feedback:', json.message);
+            gasMessage = json.message || '';
+          }
+        }
+      } catch (err: any) {
+        console.warn('Gagal menghapus juri dari Google Sheets:', err);
+      }
     }
 
-    return { success: true, message: `Akun Dewan Juri "${target?.nama || juryId}" berhasil dihapus.` };
+    return {
+      success: true,
+      message: gasSuccess
+        ? `Akun Dewan Juri "${targetName || targetUser}" (${targetUser}) berhasil dihapus permanen dari sistem & Google Sheets!`
+        : `Akun Dewan Juri "${targetName || targetUser}" (${targetUser}) berhasil dihapus dari sistem.${gasMessage ? ` (${gasMessage})` : ''}`
+    };
   }
 
   public updateWeights(juryWeight: number, publicWeight: number): void {

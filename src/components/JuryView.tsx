@@ -285,7 +285,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
       setFeedback({
         type: 'error',
         message: closedStatus.reason === 'not_active'
-          ? 'Gagal menyimpan: Sub-Event sedang ditutup oleh panitia.'
+          ? 'Gagal menyimpan: Event sedang ditutup oleh panitia.'
           : 'Gagal menyimpan: Batas waktu penilaian telah berakhir dan sistem terkunci.'
       });
       return;
@@ -325,10 +325,10 @@ export const JuryView: React.FC<JuryViewProps> = ({
         <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-200 shadow-xs">
           <Lock className="w-8 h-8" />
         </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Semua Sub-Event Penjurian Sedang Ditutup</h2>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Semua Event Penjurian Sedang Ditutup</h2>
         <p className="text-sm text-slate-600 mb-6 leading-relaxed max-w-lg mx-auto">
-          Saat ini seluruh sub-event sedang dalam status dikunci/ditutup oleh Admin Panitia.
-          Penilaian dewan juri akan dibuka kembali saat panitia mengaktifkan sub-event terkait.
+          Saat ini seluruh event sedang dalam status dikunci/ditutup oleh Admin Panitia.
+          Penilaian dewan juri akan dibuka kembali saat panitia mengaktifkan event terkait.
         </p>
       </div>
     );
@@ -342,7 +342,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
           <div className="flex items-center gap-2">
             <Calendar className="w-4 h-4 text-emerald-800" />
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-              Pilihan Sub-Event Penjurian:
+              Pilihan Event Penjurian:
             </span>
           </div>
 
@@ -415,7 +415,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
               </h1>
 
               <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
-                <span className="font-semibold text-slate-600">Sub-Event Aktif:</span>
+                <span className="font-semibold text-slate-600">Event Aktif:</span>
                 <span className="text-emerald-800 font-bold truncate">
                   {currentSubEvent.nama_event}
                 </span>
@@ -823,7 +823,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
                   <Lock className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>
                     {closedStatus.reason === 'not_active'
-                      ? 'Sub-Event sedang ditutup oleh panitia. Form dalam mode hanya-baca (Read-Only).'
+                      ? 'Event sedang ditutup oleh panitia. Form dalam mode hanya-baca (Read-Only).'
                       : `Periode penjurian telah berakhir pada ${formattedDeadline}. Form ini dalam mode hanya-baca (Read-Only).`}
                   </span>
                 </div>
