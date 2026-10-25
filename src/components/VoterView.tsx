@@ -379,7 +379,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
   }
 
   return (
-    <div className="space-y-6 pb-16">
+    <div className="space-y-4 pb-2">
       {/* Sub-Event Selector Tabs (Sub-Event Dikunci: HIDE. Batas Waktu Habis: Muncul tapi Close) */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

@@ -17,7 +17,9 @@ import {
   Users,
   User as UserIcon,
   AlertCircle,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
 import { getTeamInitials } from '../utils/initials';
 
@@ -333,7 +335,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
   }
 
   return (
-    <div className="space-y-6 pb-16">
+    <div className="space-y-4 pb-2">
       {/* Sub-Event Selector Tabs for Dewan Juri */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -382,57 +384,85 @@ export const JuryView: React.FC<JuryViewProps> = ({
       </div>
 
       {/* Jury Header Card */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-700 flex items-center justify-center font-bold">
-              <UserCheck className="w-6 h-6" />
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          {/* Section 1: Jury Identity & Sub-Event Info */}
+          <div className="flex items-start gap-3.5 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-800 text-amber-400 flex items-center justify-center font-bold shadow-xs shrink-0">
+              <UserCheck className="w-6 h-6 text-amber-300" />
             </div>
-            <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                <span>Dewan Juri Terverifikasi</span>
-                <span aria-hidden="true">·</span>
-                <span className="text-emerald-700 font-semibold">{currentUser.jurySpecialty || 'Penilai Resmi'}</span>
-                <span aria-hidden="true">·</span>
-                <span className="text-slate-600 font-medium">Sub-Event: {currentSubEvent.nama_event}</span>
-                <span aria-hidden="true">·</span>
-                <span className={`px-2 py-0.5 rounded font-bold ${
-                  !isSubEventClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Dewan Juri Terverifikasi</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                  {currentUser.jurySpecialty || 'Penilai Resmi'}
+                </span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                  !isSubEventClosed
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : 'bg-rose-100 text-rose-900 border-rose-300'
                 }`}>
                   {!isSubEventClosed ? 'Status: Dibuka' : 'Status: Ditutup'}
                 </span>
               </div>
-              <h1 className="text-xl font-bold text-slate-900">{currentUser.nama}</h1>
+
+              <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight truncate">
+                {currentUser.nama}
+              </h1>
+
+              <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+                <span className="font-semibold text-slate-600">Sub-Event Aktif:</span>
+                <span className="text-emerald-800 font-bold truncate">
+                  {currentSubEvent.nama_event}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Progress Indicator & Deadline Status */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 min-w-[240px]">
-              <div className="flex items-center justify-between text-xs font-medium text-slate-600 mb-1.5">
-                <span>Progres Penilaian Kategori:</span>
+          {/* Section 2: Progres Penilaian & Batas Waktu Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:w-auto shrink-0">
+            {/* Box 1: Progres Penilaian */}
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 min-w-[210px]">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
+                <span>Progres Penilaian:</span>
                 <span className="font-mono font-bold text-emerald-800 tabular-nums">
-                  {gradedTeamsCount} dari {totalTeams} {currentSubEvent.tipe_peserta === 'Individu' ? 'Peserta' : 'Regu'} ({progressPercent}%)
+                  {gradedTeamsCount}/{totalTeams} ({progressPercent}%)
                 </span>
               </div>
-              <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+              <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-emerald-700 transition-all duration-300"
+                  className="h-full bg-emerald-700 rounded-full transition-all duration-300"
                   style={{ width: `${progressPercent}%` }}
                 ></div>
               </div>
+              <div className="text-[10px] text-slate-500 mt-1">
+                {currentSubEvent.tipe_peserta === 'Individu' ? 'Peserta' : 'Regu'} dalam kategori aktif
+              </div>
             </div>
 
+            {/* Box 2: Batas Waktu Penjurian */}
             {formattedDeadline && (
-              <div className={`p-3.5 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+              <div className={`p-3.5 rounded-xl border min-w-[210px] flex items-center gap-3 ${
                 isSubEventClosed
-                  ? 'bg-rose-50 border-rose-200 text-rose-800'
-                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                  ? 'bg-rose-50 border-rose-200 text-rose-900'
+                  : 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
               }`}>
-                {isSubEventClosed ? <Lock className="w-4 h-4 text-rose-600 shrink-0" /> : <Clock className="w-4 h-4 text-emerald-700 shrink-0" />}
-                <div>
-                  <div className="font-bold">{isSubEventClosed ? 'Status Penjurian:' : 'Batas Penjurian:'}</div>
-                  <div className="text-[11px] opacity-85">{isSubEventClosed ? 'Ditutup' : formattedDeadline}</div>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  isSubEventClosed ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {isSubEventClosed ? <Lock className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                    {isSubEventClosed ? 'Status Waktu' : 'Batas Penjurian'}
+                  </div>
+                  <div className="text-xs font-bold truncate">
+                    {isSubEventClosed ? 'Waktu Penjurian Berakhir' : formattedDeadline}
+                  </div>
                 </div>
               </div>
             )}
@@ -751,32 +781,43 @@ export const JuryView: React.FC<JuryViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs overflow-y-auto">
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-100 my-8 overflow-hidden">
             {/* Modal Header */}
-            <div className="bg-emerald-900 text-white p-5 flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-xs text-amber-300 mb-1">
-                  <span>Form Penilaian Dewan Juri</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{activeCategory?.nama_kategori}</span>
-                </div>
-                <h2 className="text-lg font-bold text-white">
-                  {activeTeamForScoring.tipe_partisipasi === 'Individu' ? 'Penilaian Peserta:' : 'Penilaian Regu:'}{' '}
-                  {activeTeamForScoring.nama_regu}
-                </h2>
-                <p className="text-xs text-emerald-200 mt-0.5">
-                  {activeTeamForScoring.kelas_pangkalan}
-                </p>
-              </div>
+            <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white px-5 py-4 border-b border-emerald-800/40">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 shadow-2xs">
+                      Form Penilaian Juri
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-200 truncate">
+                      {activeCategory?.nama_kategori}
+                    </span>
+                  </div>
 
-              <button
-                onClick={() => setActiveTeamForScoring(null)}
-                className="p-1 rounded-lg text-emerald-300 hover:text-white hover:bg-emerald-800 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+                  <h2 className="text-base sm:text-lg font-bold text-white truncate">
+                    {activeTeamForScoring.nama_regu}
+                  </h2>
+
+                  <div className="flex items-center gap-2 text-xs text-emerald-200/90 mt-0.5">
+                    <span className="font-medium">{activeTeamForScoring.kelas_pangkalan}</span>
+                    <span className="text-emerald-500">•</span>
+                    <span className="capitalize">{activeTeamForScoring.kategori_regu || 'Regu'}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTeamForScoring(null)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-emerald-200 hover:text-white transition-colors shrink-0 cursor-pointer"
+                  title="Tutup dialog penilaian"
+                  aria-label="Tutup"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 sm:p-6 space-y-5 max-h-[70vh] overflow-y-auto">
               {isSubEventClosed && (
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-center gap-2">
                   <Lock className="w-4 h-4 text-rose-600 shrink-0" />
@@ -796,9 +837,17 @@ export const JuryView: React.FC<JuryViewProps> = ({
 
                 return (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 pb-2 border-b">
-                      <span>Kriteria Pertanyaan Penilaian ({effectiveCriteria.length} Pertanyaan)</span>
-                      <span className="text-emerald-800 font-bold">Skala 1 s/d 5</span>
+                    <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200 text-xs">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                        <Award className="w-4 h-4 text-emerald-700 shrink-0" />
+                        <span>Kriteria Penilaian</span>
+                        <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                          {effectiveCriteria.length} Kriteria
+                        </span>
+                      </div>
+                      <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/80 shrink-0">
+                        <span>Skala Nilai 1 - 5</span>
+                      </div>
                     </div>
 
                     {effectiveCriteria.map((kriteriaText, idx) => {
@@ -807,14 +856,14 @@ export const JuryView: React.FC<JuryViewProps> = ({
                       return (
                         <div
                           key={idx}
-                          className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5"
+                          className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200 space-y-2.5"
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div className="text-xs font-medium text-slate-900 leading-snug">
+                            <div className="text-xs font-semibold text-slate-900 leading-snug">
                               <span className="font-bold text-emerald-800 mr-1.5">{idx + 1}.</span>
                               {kriteriaText}
                             </div>
-                            <div className="font-mono text-sm font-bold text-emerald-800 bg-white px-2.5 py-0.5 rounded border border-slate-200">
+                            <div className="font-mono text-sm font-bold text-emerald-800 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs shrink-0">
                               {currentScore}.0
                             </div>
                           </div>
@@ -835,7 +884,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
                                       ? 'bg-emerald-800 text-white border-emerald-800 shadow-xs'
                                       : isSubEventClosed
                                       ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                      : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/30'
+                                      : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/40'
                                   }`}
                                 >
                                   {scoreOption}
@@ -844,10 +893,10 @@ export const JuryView: React.FC<JuryViewProps> = ({
                             })}
                           </div>
 
-                          <div className="flex justify-between text-[10px] text-slate-400 px-1">
-                            <span>1 = Kurang</span>
-                            <span>3 = Cukup</span>
-                            <span>5 = Sangat Istimewa</span>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium px-1">
+                            <span>1: Kurang</span>
+                            <span>3: Cukup</span>
+                            <span>5: Sangat Istimewa</span>
                           </div>
                         </div>
                       );
@@ -871,63 +920,85 @@ export const JuryView: React.FC<JuryViewProps> = ({
                 />
               </div>
 
-              {/* Live Score Summary */}
-              <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-emerald-950">Rata-Rata Nilai Juri:</div>
-                  <div className="text-[11px] text-emerald-700">Otomatis dihitung dari {activeCategory?.kriteria?.length || 0} kriteria</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-2xl font-extrabold text-emerald-900 font-mono">
-                    {calculateLiveAverage()} <span className="text-sm font-normal text-emerald-700">/ 5.00</span>
+              {/* Live Score Summary (Professional Executive Card) */}
+              <div className="p-3.5 sm:p-4 bg-gradient-to-br from-emerald-900 to-teal-950 text-white rounded-2xl shadow-sm border border-emerald-700/40">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Rata-Rata Nilai Akhir</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-200/80 mt-0.5">
+                      Dihitung otomatis ({activeCategory?.kriteria?.length || 0} kriteria)
+                    </p>
                   </div>
-                  <div className="text-[10px] text-emerald-700 font-medium">
-                    Setara {Number((calculateLiveAverage() * 20).toFixed(1))} dari skala 100
+
+                  <div className="text-right shrink-0">
+                    <div className="flex items-baseline justify-end gap-1 font-mono">
+                      <span className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+                        {calculateLiveAverage()}
+                      </span>
+                      <span className="text-xs font-medium text-emerald-300">/ 5.00</span>
+                    </div>
+                    <div className="inline-block mt-0.5 text-[10px] font-semibold text-amber-200 bg-emerald-800/80 px-2 py-0.5 rounded-md border border-amber-400/30">
+                      Skala 100: {Number((calculateLiveAverage() * 20).toFixed(1))}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Modal Footer Actions */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setActiveTeamForScoring(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
-              >
-                Tutup
-              </button>
-
-              <div className="flex items-center gap-2">
-                {isSubEventClosed ? (
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 px-3 py-2 bg-rose-50 border border-rose-200 rounded-lg">
-                    <Lock className="w-4 h-4 text-rose-600" />
-                    <span>Penjurian Ditutup ({closedStatus.reason === 'not_active' ? 'Sub-Event Non-Aktif' : 'Waktu Habis'})</span>
+            {/* Modal Footer Actions: Tutup, Draft, dan Kirim */}
+            <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200">
+              {isSubEventClosed ? (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-rose-700 px-3 py-2 bg-rose-50 border border-rose-200 rounded-lg flex-1">
+                    <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span className="truncate">Penjurian Ditutup ({closedStatus.reason === 'not_active' ? 'Non-Aktif' : 'Waktu Habis'})</span>
                   </div>
-                ) : (
-                  <>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTeamForScoring(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-white border border-slate-300 rounded-lg"
+                  >
+                    Tutup
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTeamForScoring(null)}
+                    className="py-2.5 px-3.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors cursor-pointer active:scale-98 shrink-0"
+                  >
+                    Tutup
+                  </button>
+
+                  <div className="flex items-center gap-2 flex-1 justify-end">
                     <button
                       type="button"
                       disabled={isSubmitting}
                       onClick={() => handleSaveScore(false)}
-                      className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg flex items-center gap-1.5"
+                      className="py-2.5 px-3.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-98 shadow-2xs disabled:opacity-60 flex-1 sm:flex-initial"
+                      title="Simpan sebagai draft sementara"
                     >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>Simpan Draft</span>
+                      <Save className="w-4 h-4 text-slate-500" />
+                      <span>Draft</span>
                     </button>
 
                     <button
                       type="button"
                       disabled={isSubmitting}
                       onClick={() => handleSaveScore(true)}
-                      className="px-5 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 shadow-sm"
+                      className="py-2.5 px-4 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer active:scale-98 shadow-sm disabled:opacity-60 flex-1 sm:flex-initial"
+                      title="Kirim nilai penilaian final"
                     >
-                      <Send className="w-3.5 h-3.5 text-amber-300" />
-                      <span>{isSubmitting ? 'Menyimpan...' : 'Kirim Penilaian Final'}</span>
+                      <Send className="w-4 h-4 text-amber-300" />
+                      <span>{isSubmitting ? 'Mengirim...' : 'Kirim'}</span>
                     </button>
-                  </>
-                )}
-              </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

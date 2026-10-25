@@ -55,25 +55,25 @@ export async function generateRecapPDF(
   ]);
 
   // 1. KOP REKAPITULASI RESMI
-  // Layout Kop: Kiri = Logo Kegiatan, Tengah = Teks Kop Surat, Kanan = Logo Sekolah
+  // Layout Kop Resmi: Kiri = Logo Sekolah, Tengah = Teks Kop Surat, Kanan = Logo Kegiatan
   const logoSize = 17; // 17mm x 17mm
   const logoY = 9.5;
 
-  // Render Kiri: Logo Kegiatan (Pramuka / OSIS / Camp / Custom)
-  if (logoKegiatanPng) {
+  // Render Kiri: Logo Sekolah (SMPIT Pondok Duta / Tut Wuri / Custom)
+  if (logoSekolahPng) {
     try {
-      doc.addImage(logoKegiatanPng, 'PNG', margin + 1, logoY, logoSize, logoSize);
+      doc.addImage(logoSekolahPng, 'PNG', margin + 1, logoY, logoSize, logoSize);
     } catch (e) {
-      console.warn('Gagal menambahkan Logo Kegiatan ke PDF:', e);
+      console.warn('Gagal menambahkan Logo Sekolah ke PDF:', e);
     }
   }
 
-  // Render Kanan: Logo Sekolah (SMPIT Pondok Duta / Tut Wuri / Custom)
-  if (logoSekolahPng) {
+  // Render Kanan: Logo Kegiatan (Pramuka / OSIS / Camp / Cabang Olahraga / Custom)
+  if (logoKegiatanPng) {
     try {
-      doc.addImage(logoSekolahPng, 'PNG', pageWidth - margin - logoSize - 1, logoY, logoSize, logoSize);
+      doc.addImage(logoKegiatanPng, 'PNG', pageWidth - margin - logoSize - 1, logoY, logoSize, logoSize);
     } catch (e) {
-      console.warn('Gagal menambahkan Logo Sekolah ke PDF:', e);
+      console.warn('Gagal menambahkan Logo Kegiatan ke PDF:', e);
     }
   }
 

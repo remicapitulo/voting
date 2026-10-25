@@ -12,7 +12,7 @@ import {
   ArrowRight,
   ExternalLink,
   ShieldCheck,
-  Flame
+  Trophy
 } from 'lucide-react';
 import { DevicePlatform } from '../hooks/usePWAInstall';
 
@@ -67,8 +67,8 @@ export const PWAInstallModal: React.FC<PWAInstallModalProps> = ({
           </button>
 
           <div className="flex items-center gap-3.5">
-            <div className="w-13 h-13 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center shadow-lg shrink-0">
-              <Flame className="w-7 h-7 fill-amber-400 stroke-slate-950" />
+            <div className="w-13 h-13 rounded-2xl bg-white p-1 flex items-center justify-center shadow-lg shrink-0 border border-amber-400/40 overflow-hidden">
+              <img src="/icon.svg" alt="Piala Duta Evoting" className="w-full h-full object-contain" />
             </div>
             <div>
               <div className="flex items-center gap-2">

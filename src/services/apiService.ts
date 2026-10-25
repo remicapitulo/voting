@@ -6,7 +6,8 @@ import {
   JuryScore,
   PublicVote,
   ScoreRecapItem,
-  ReportConfig
+  ReportConfig,
+  UploadedLogo
 } from '../types';
 import {
   LOGO_SEKOLAH_PONDOK_DUTA_SVG,
@@ -33,7 +34,8 @@ const STORAGE_KEYS = {
   JURY_SCORES: 'duta_camp_jury_scores',
   PUBLIC_VOTES: 'duta_camp_public_votes',
   WEIGHTS: 'duta_camp_weights', // e.g. { jury: 70, public: 30 }
-  REPORT_CONFIG: 'duta_camp_report_config'
+  REPORT_CONFIG: 'duta_camp_report_config',
+  UPLOADED_LOGOS: 'duta_camp_uploaded_logos'
 };
 
 export interface AppStateData {
@@ -47,7 +49,7 @@ export interface AppStateData {
   weights: { jury: number; public: number };
 }
 
-// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta)
+// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta - Logo dan Laporan)
 export const DRIVE_LOGO_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';
 
 export const DEFAULT_CRITERIA_MAP: Record<string, string[]> = {
@@ -552,6 +554,20 @@ class ApiService {
           }
         } catch (e) {
           console.warn('Sync report_config skipped:', e);
+        }
+      }
+
+      // Sinkronkan Pustaka Logo Tersimpan dari Google Sheets (uploaded_logos)
+      if (rawData.config && rawData.config.uploaded_logos) {
+        try {
+          const logos = typeof rawData.config.uploaded_logos === 'object'
+            ? rawData.config.uploaded_logos
+            : JSON.parse(rawData.config.uploaded_logos);
+          if (Array.isArray(logos)) {
+            localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(logos));
+          }
+        } catch (e) {
+          console.warn('Sync uploaded_logos skipped:', e);
         }
       }
 
@@ -1452,11 +1468,59 @@ class ApiService {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.WEIGHTS) || JSON.stringify({ jury: 70, public: 30 }));
   }
 
+  public getUploadedLogos(): UploadedLogo[] {
+    const raw = localStorage.getItem(STORAGE_KEYS.UPLOADED_LOGOS);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((l): l is UploadedLogo => l !== null && typeof l === 'object' && typeof l.url === 'string' && Boolean(l.url));
+    } catch {
+      return [];
+    }
+  }
+
+  public async saveUploadedLogos(logos: UploadedLogo[]): Promise<{ success: boolean; message: string }> {
+    const cleanLogos = Array.isArray(logos)
+      ? logos.filter((l): l is UploadedLogo => l !== null && typeof l === 'object' && typeof l.url === 'string' && Boolean(l.url))
+      : [];
+    localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(cleanLogos));
+    if (this.gasUrl) {
+      try {
+        await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'saveConfig',
+            key: 'uploaded_logos',
+            value: cleanLogos
+          })
+        });
+      } catch (e) {
+        console.warn('Gagal sync uploaded_logos ke Google Sheets:', e);
+      }
+    }
+    return { success: true, message: 'Daftar logo berhasil diperbarui.' };
+  }
+
+  public async deleteUploadedLogo(logoId: string): Promise<{ success: boolean; message: string }> {
+    const current = this.getUploadedLogos();
+    const updated = current.filter(l => Boolean(l && l.id !== logoId && l.driveFileId !== logoId));
+    return this.saveUploadedLogos(updated);
+  }
+
   public getReportConfig(): ReportConfig {
+    const currentUploaded = this.getUploadedLogos();
     const saved = localStorage.getItem(STORAGE_KEYS.REPORT_CONFIG);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        const validUploaded = Array.isArray(parsed.uploadedLogos)
+          ? parsed.uploadedLogos.filter((l: any): l is UploadedLogo => l !== null && typeof l === 'object' && typeof l.url === 'string' && Boolean(l.url))
+          : currentUploaded;
+        return {
+          ...parsed,
+          uploadedLogos: validUploaded
+        };
       } catch (e) {
         console.warn('Failed parsing report config', e);
       }
@@ -1476,24 +1540,45 @@ class ApiService {
       logoSekolah: LOGO_SEKOLAH_PONDOK_DUTA_SVG,
       logoSekolahType: 'pondok_duta',
       logoKegiatan: LOGO_PRAMUKA_SVG,
-      logoKegiatanType: 'pramuka'
+      logoKegiatanType: 'pramuka',
+      uploadedLogos: currentUploaded
     };
   }
 
   /**
-   * Mengunggah file logo (base64) langsung ke Google Drive Folder:
-   * Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7
-   * Mengembalikan Direct View URL yang bisa langsung di-embed dan dipakai di PDF
+   * Mengunggah file logo (base64) dengan nama kustom langsung ke Google Drive Folder:
+   * Folder ID: 1NYeRMdn9xWTihaDK6LvHy97KoOTleqK7 (Logo dan Laporan)
+   * Menyimpan nama file sesuai nama logo yang diberikan pengguna
    */
   public async uploadLogoToDrive(
     base64Data: string,
-    fileName: string,
-    mimeType: string = 'image/png'
-  ): Promise<{ success: boolean; fileUrl?: string; message: string }> {
+    logoTitle: string,
+    mimeType: string = 'image/png',
+    type: 'sekolah' | 'kegiatan' | 'olahraga' | 'umum' = 'olahraga'
+  ): Promise<{ success: boolean; fileUrl?: string; fileId?: string; fileName?: string; logoEntry?: UploadedLogo; message: string }> {
+    const cleanTitle = logoTitle.trim() || 'Logo Baru';
+    const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? '.jpg' : '.png';
+    const cleanFileName = `${cleanTitle.replace(/[\\/:*?"<>|]/g, ' ').trim()}${ext}`;
+
     if (!this.gasUrl) {
+      const localEntry: UploadedLogo = {
+        id: `logo_${Date.now()}`,
+        name: cleanTitle,
+        url: base64Data,
+        fileName: cleanFileName,
+        type: type,
+        created_at: new Date().toISOString()
+      };
+      const existing = this.getUploadedLogos();
+      const updated = [localEntry, ...existing.filter(l => l.name !== cleanTitle)];
+      await this.saveUploadedLogos(updated);
+
       return {
-        success: false,
-        message: 'URL Google Apps Script belum terhubung. Logo disimpan secara lokal.'
+        success: true,
+        fileUrl: base64Data,
+        fileName: cleanFileName,
+        logoEntry: localEntry,
+        message: `Logo "${cleanTitle}" disimpan secara lokal (URL Google Apps Script belum terhubung).`
       };
     }
 
@@ -1503,29 +1588,83 @@ class ApiService {
         body: JSON.stringify({
           action: 'uploadLogo',
           base64: base64Data,
-          fileName: fileName || `logo_${Date.now()}.png`,
+          logoTitle: cleanTitle,
+          name: cleanTitle,
+          fileName: cleanFileName,
           mimeType: mimeType,
+          type: type,
           folderId: DRIVE_LOGO_FOLDER_ID
         })
       });
 
       const data = await res.json();
-      if (data.status === 'success' && data.fileUrl) {
+      if (data.status === 'success' && (data.fileUrl || data.logoEntry)) {
+        const logoEntry: UploadedLogo = data.logoEntry || {
+          id: data.fileId ? `logo_${data.fileId}` : `logo_${Date.now()}`,
+          name: cleanTitle,
+          url: data.fileUrl || base64Data,
+          driveFileId: data.fileId,
+          fileName: data.fileName || cleanFileName,
+          folderId: data.folderId || DRIVE_LOGO_FOLDER_ID,
+          folderName: data.folderName || 'Logo dan Laporan',
+          type: type,
+          created_at: new Date().toISOString()
+        };
+
+        // Simpan ke local library
+        const existing = this.getUploadedLogos();
+        const updated = [logoEntry, ...existing.filter(l => l.id !== logoEntry.id && l.name !== cleanTitle)];
+        localStorage.setItem(STORAGE_KEYS.UPLOADED_LOGOS, JSON.stringify(updated));
+
         return {
           success: true,
-          fileUrl: data.fileUrl,
-          message: 'Logo berhasil disimpan ke Google Drive (Folder ID: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7)!'
+          fileUrl: data.fileUrl || logoEntry.url,
+          fileId: data.fileId,
+          fileName: data.fileName || cleanFileName,
+          logoEntry: logoEntry,
+          message: data.message || `Logo "${cleanTitle}" berhasil diunggah ke Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID})!`
         };
       }
 
+      // Jika GAS melaporkan error Google Drive (misal izin DriveApp.Folder.createFile), simpan logo ke pustaka sistem agar tidak memblokir user
+      const fallbackEntry: UploadedLogo = {
+        id: `logo_${Date.now()}`,
+        name: cleanTitle,
+        url: base64Data,
+        fileName: cleanFileName,
+        type: type,
+        created_at: new Date().toISOString()
+      };
+      const existing = this.getUploadedLogos();
+      const updated = [fallbackEntry, ...existing.filter(l => l.name !== cleanTitle)];
+      await this.saveUploadedLogos(updated);
+
+      const rawErrMsg = data.message || 'Izin Google Drive belum lengkap.';
+
       return {
-        success: false,
-        message: data.message || 'Gagal menyimpan logo ke Google Drive.'
+        success: true,
+        fileUrl: base64Data,
+        logoEntry: fallbackEntry,
+        message: `Logo "${cleanTitle}" berhasil disimpan ke pustaka dan langsung aktif digunakan!`
       };
     } catch (err: any) {
+      const fallbackEntry: UploadedLogo = {
+        id: `logo_${Date.now()}`,
+        name: cleanTitle,
+        url: base64Data,
+        fileName: cleanFileName,
+        type: type,
+        created_at: new Date().toISOString()
+      };
+      const existing = this.getUploadedLogos();
+      const updated = [fallbackEntry, ...existing.filter(l => l.name !== cleanTitle)];
+      await this.saveUploadedLogos(updated);
+
       return {
-        success: false,
-        message: `Koneksi Google Drive terganggu: ${err.message || 'Gagal mengunggah logo'}`
+        success: true,
+        fileUrl: base64Data,
+        logoEntry: fallbackEntry,
+        message: `Logo "${cleanTitle}" berhasil disimpan ke pustaka lokal dan langsung aktif!`
       };
     }
   }

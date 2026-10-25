@@ -253,6 +253,17 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
                     <li>Akses: <strong>Siapa saja (Anyone)</strong> (wajib agar aplikasi dapat memanggil API)</li>
                   </ul>
                 </li>
+                <li className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-amber-900">
+                  <strong>Izin Google Drive Folder (Penyimpanan Logo Cloud):</strong>
+                  <p className="mt-1 font-normal text-slate-700 leading-relaxed">
+                    Agar fitur unggah logo ke folder <strong>"Logo dan Laporan" (ID: <code>1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7</code>)</strong> berjalan lancar tanpa error perizinan:
+                  </p>
+                  <ul className="list-disc list-inside mt-1 ml-2 space-y-1 font-normal text-slate-700">
+                    <li>Di editor Apps Script, pada dropdown fungsi pilih <code>authorizeDriveApp</code> lalu klik ▶ <strong>Run</strong>.</li>
+                    <li>Klik <strong>Review Permissions</strong> &gt; Pilih Akun Google &gt; <strong>Advanced</strong> &gt; <strong>Allow</strong>.</li>
+                    <li>Setelah itu, jika ada perubahan kode, perbarui deployment via <strong>Deploy &gt; Manage deployments &gt; New version &gt; Deploy</strong>.</li>
+                  </ul>
+                </li>
                 <li className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
                   <strong>Hubungkan URL:</strong> Salin Web App URL (berakhiran <code>/exec</code>), tempel di kolom atas, lalu klik <strong>"Simpan & Uji Koneksi"</strong>.
                 </li>

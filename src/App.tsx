@@ -15,7 +15,7 @@ import { GasIntegrationModal } from './components/GasIntegrationModal';
 import { PrintReportModal } from './components/PrintReportModal';
 import { DeveloperContactModal } from './components/DeveloperContactModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
-import { Flame } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(apiService.getCurrentUser());
@@ -142,134 +142,125 @@ export default function App() {
     appState.categories[0];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-between text-slate-800">
-      <div>
-        {/* Top Bar Navigation */}
-        <Navbar
-          currentUser={currentUser}
-          activeTab={activeTab}
-          onSelectTab={setActiveTab}
-          onOpenAuth={() => setIsAuthOpen(true)}
-          onOpenGasModal={() => setIsGasModalOpen(true)}
-          onLogout={handleLogout}
-          hasGasConfigured={hasGasConfigured}
-          categories={appState.categories}
-          selectedCategoryId={selectedCategoryId}
-          onSelectCategory={setSelectedCategoryId}
-          event={activeEvent}
-        />
+    <div className="min-h-screen bg-slate-50 flex flex-col text-slate-800">
+      {/* Top Bar Navigation */}
+      <Navbar
+        currentUser={currentUser}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenGasModal={() => setIsGasModalOpen(true)}
+        onLogout={handleLogout}
+        hasGasConfigured={hasGasConfigured}
+        categories={appState.categories}
+        selectedCategoryId={selectedCategoryId}
+        onSelectCategory={setSelectedCategoryId}
+        event={activeEvent}
+        logoAplikasiHeader={reportConfig.logoAplikasiHeader}
+      />
 
-        {/* Main Content Viewport with PW Mobile Bottom Navigation Safe Spacing */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 pb-24 md:pb-12">
-          {activeTab === 'voter' && (
-            <VoterView
-              event={activeEvent}
-              events={appState.events}
-              categories={appState.categories}
-              teams={appState.teams}
-              publicVotes={appState.publicVotes}
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-              onRefreshData={refreshData}
-              selectedEventId={selectedEventId}
-              onSelectEvent={handleSelectEvent}
-              selectedCategoryId={selectedCategoryId}
-              onSelectCategory={setSelectedCategoryId}
-            />
-          )}
+      {/* Main Content Viewport with compact natural height and balanced spacing */}
+      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-3 sm:pt-4 pb-2">
+        {activeTab === 'voter' && (
+          <VoterView
+            event={activeEvent}
+            events={appState.events}
+            categories={appState.categories}
+            teams={appState.teams}
+            publicVotes={appState.publicVotes}
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onRefreshData={refreshData}
+            selectedEventId={selectedEventId}
+            onSelectEvent={handleSelectEvent}
+            selectedCategoryId={selectedCategoryId}
+            onSelectCategory={setSelectedCategoryId}
+          />
+        )}
 
-          {activeTab === 'jury' && (
-            <JuryView
-              event={activeEvent}
-              events={appState.events}
-              categories={appState.categories}
-              teams={appState.teams}
-              juryScores={appState.juryScores}
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-              onRefreshData={refreshData}
-              selectedEventId={selectedEventId}
-              onSelectEvent={handleSelectEvent}
-              selectedCategoryId={selectedCategoryId}
-              onSelectCategory={setSelectedCategoryId}
-            />
-          )}
+        {activeTab === 'jury' && (
+          <JuryView
+            event={activeEvent}
+            events={appState.events}
+            categories={appState.categories}
+            teams={appState.teams}
+            juryScores={appState.juryScores}
+            currentUser={currentUser}
+            onOpenAuth={() => setIsAuthOpen(true)}
+            onRefreshData={refreshData}
+            selectedEventId={selectedEventId}
+            onSelectEvent={handleSelectEvent}
+            selectedCategoryId={selectedCategoryId}
+            onSelectCategory={setSelectedCategoryId}
+          />
+        )}
 
-          {activeTab === 'admin' && (
-            <AdminView
-              event={activeEvent}
-              events={appState.events}
-              categories={appState.categories}
-              teams={appState.teams}
-              users={appState.users}
-              juryScores={appState.juryScores}
-              publicVotes={appState.publicVotes}
-              currentUser={currentUser}
-              onOpenPrintReport={handleOpenPrintReport}
-              onRefreshData={refreshData}
-              onSelectEvent={(eventId) => {
-                handleSelectEvent(eventId);
-              }}
-              reportConfig={reportConfig}
-              onUpdateReportConfig={handleUpdateReportConfig}
-            />
-          )}
-        </main>
-      </div>
+        {activeTab === 'admin' && (
+          <AdminView
+            event={activeEvent}
+            events={appState.events}
+            categories={appState.categories}
+            teams={appState.teams}
+            users={appState.users}
+            juryScores={appState.juryScores}
+            publicVotes={appState.publicVotes}
+            currentUser={currentUser}
+            onOpenPrintReport={handleOpenPrintReport}
+            onRefreshData={refreshData}
+            onSelectEvent={(eventId) => {
+              handleSelectEvent(eventId);
+            }}
+            reportConfig={reportConfig}
+            onUpdateReportConfig={handleUpdateReportConfig}
+          />
+        )}
+      </main>
 
-      {/* Footer adhering to user requirement: App Name, Copyright, and Created by Abu Haripin with Modal Trigger */}
-      <footer className="border-t border-slate-200 bg-white pt-8 pb-24 md:pb-8 mt-12 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 pb-6 border-b border-slate-100">
-            {/* App Info & Identity */}
-            <div className="flex items-center gap-3 text-center sm:text-left">
-              <div className="w-10 h-10 rounded-xl bg-emerald-800 text-amber-400 flex items-center justify-center shrink-0 shadow-xs">
-                <Flame className="w-5 h-5 fill-amber-400 stroke-amber-300" />
+      {/* Footer: Positioned neatly right under content without large gaps, matching header logo */}
+      <footer className="border-t border-slate-200 bg-white py-4 pb-20 sm:pb-4 text-xs text-slate-500 mt-2 sm:mt-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
+            {/* App Info & Identity (Matches header logo exactly with white background) */}
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white flex items-center justify-center shadow-xs overflow-hidden p-1 border border-slate-200 ring-1 ring-slate-900/5 shrink-0">
+                {reportConfig.logoAplikasiHeader ? (
+                  <img
+                    src={reportConfig.logoAplikasiHeader}
+                    alt="Logo Aplikasi"
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="w-full h-full rounded-lg bg-emerald-50 flex items-center justify-center">
+                    <Trophy className="w-4 h-4 text-amber-500 fill-amber-400/20" />
+                  </div>
+                )}
               </div>
-              <div>
-                <div className="text-sm font-bold text-slate-900">
+              <div className="text-left">
+                <div className="text-xs sm:text-sm font-bold text-slate-900 leading-tight">
                   Duta Evoting - SMPIT Pondok Duta
                 </div>
-                <div className="text-xs text-slate-500">
-                  Sistem Terpadu E-Voting &amp; Penilaian Dewan Juri Multi-Event
+                <div className="text-[11px] text-slate-500 leading-tight mt-0.5">
+                  Sistem Terpadu E-Voting &amp; Penilaian Dewan Juri
                 </div>
               </div>
             </div>
 
-            {/* Sub-Event Status & Admin GAS Integration */}
-            <div className="flex flex-wrap items-center justify-center gap-3 text-xs text-slate-500">
-              <span className="px-2.5 py-1 rounded-full bg-slate-100 font-medium text-slate-700">
-                Sub-Event: {activeEvent.kode_event || activeEvent.nama_event}
-              </span>
-              {currentUser?.role === 'admin' && (
+            {/* Copyright & Dibuat Oleh (Neatly aligned and balanced on desktop, tab, and mobile) */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-2.5 gap-y-1.5 text-[11px] sm:text-xs text-slate-500">
+              <span className="whitespace-nowrap">© 2026 SMPIT Pondok Duta</span>
+              <span className="text-slate-300 hidden sm:inline" aria-hidden="true">·</span>
+              <div className="inline-flex items-center gap-1.5 text-slate-600 whitespace-nowrap">
+                <span>Dibuat oleh</span>
                 <button
-                  onClick={() => setIsGasModalOpen(true)}
-                  className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium hover:bg-emerald-100 transition-colors cursor-pointer"
+                  type="button"
+                  onClick={() => setIsDevContactOpen(true)}
+                  className="font-bold text-emerald-800 hover:text-emerald-950 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 transition-all cursor-pointer shadow-2xs hover:shadow-xs group"
+                  title="Klik untuk info kontak pengembang"
                 >
-                  Google Sheets API
+                  <span className="underline decoration-emerald-500/50 group-hover:decoration-emerald-800">Abu Haripin</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 group-hover:bg-emerald-500 animate-pulse"></span>
                 </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-500">
-            {/* Copyright */}
-            <div className="text-center sm:text-left">
-              <span>© 2026 SMPIT Pondok Duta. Seluruh Hak Cipta Dilindungi Undang-Undang.</span>
-            </div>
-
-            {/* Created by Abu Haripin with Clickable Modal Trigger */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <span>Dibuat oleh</span>
-              <button
-                type="button"
-                onClick={() => setIsDevContactOpen(true)}
-                className="font-bold text-emerald-800 hover:text-emerald-950 underline decoration-emerald-500/50 hover:decoration-emerald-700 transition-colors cursor-pointer inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md hover:bg-emerald-50"
-                title="Klik untuk info kontak pengembang"
-              >
-                <span>Abu Haripin</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
-              </button>
+              </div>
             </div>
           </div>
         </div>
@@ -320,7 +311,7 @@ export default function App() {
         />
       )}
 
-      {/* Floating PWA Install Badge for Android, iPhone & Desktop */}
+      {/* Badge Melayang PWA (Diposisikan Mengambang di Atas, Setelah Header) */}
       <PWAInstallButton variant="floating" />
     </div>
   );

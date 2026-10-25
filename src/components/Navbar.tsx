@@ -36,6 +36,7 @@ interface NavbarProps {
   selectedCategoryId?: string;
   onSelectCategory?: (categoryId: string) => void;
   event?: EventModel;
+  logoAplikasiHeader?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -49,7 +50,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   categories = [],
   selectedCategoryId,
   onSelectCategory,
-  event
+  event,
+  logoAplikasiHeader
 }) => {
   const [showMobileProfileSheet, setShowMobileProfileSheet] = useState(false);
   const [showCategorySheet, setShowCategorySheet] = useState(false);
@@ -98,8 +100,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onSelectTab('voter')}
                 className="flex items-center gap-2.5 text-left group focus:outline-none"
               >
-                <div className="w-9 h-9 rounded-lg bg-emerald-800 flex items-center justify-center text-amber-400 shadow-sm transition-transform group-hover:scale-105">
-                  <Flame className="w-5 h-5 fill-amber-400 stroke-amber-300" />
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white flex items-center justify-center shadow-xs transition-transform group-hover:scale-105 overflow-hidden p-1 border border-slate-200 ring-1 ring-slate-900/5 shrink-0">
+                  {logoAplikasiHeader ? (
+                    <img
+                      src={logoAplikasiHeader}
+                      alt="Logo Aplikasi"
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-lg bg-emerald-50 flex items-center justify-center">
+                      <Trophy className="w-5 h-5 text-amber-500 fill-amber-400/20" />
+                    </div>
+                  )}
                 </div>
                 <div>
                   <span className="text-base font-bold tracking-tight text-slate-900 whitespace-nowrap block">
@@ -140,20 +152,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               )}
 
-              {/* Quick Cabang Lomba Selector di Desktop jika ada kategori */}
-              {displayCategories.length > 0 && (
-                <button
-                  onClick={() => setShowCategorySheet(true)}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-300 text-xs font-semibold text-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Pilih Cabang Lomba Langsung"
-                >
-                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-emerald-950 truncate max-w-[140px]">
-                    {currentCategory ? currentCategory.nama_kategori : 'Cabang Lomba'}
-                  </span>
-                  <ChevronDown className="w-3 h-3 text-slate-400" />
-                </button>
-              )}
 
               {currentUser?.role === 'admin' && (
                 <button
@@ -184,10 +182,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </nav>
 
-            {/* Zone 3: Desktop User Profile & Logout + PWA Install */}
+            {/* Zone 3: Desktop User Profile & Logout */}
             <div className="hidden md:flex items-center gap-3 shrink-0">
-              <PWAInstallButton variant="nav" />
-
               {currentUser ? (
                 <div className="flex items-center gap-3">
                   <div className="text-right">
@@ -221,23 +217,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* Zone 4: Mobile Top Quick Actions (PWA Install, Sheets for Admin & Quick Profile) */}
+            {/* Zone 4: Mobile Top Quick Actions (Quick Profile / Masuk) */}
             <div className="flex md:hidden items-center gap-2">
-              <PWAInstallButton variant="nav" className="px-2.5 py-1 text-[11px]" />
-
-              {currentUser?.role === 'admin' && (
-                <button
-                  onClick={onOpenGasModal}
-                  className="p-2 text-slate-600 hover:text-emerald-800 rounded-lg bg-slate-100 flex items-center gap-1 text-xs cursor-pointer"
-                  title="Google Sheets API"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-                  {hasGasConfigured && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  )}
-                </button>
-              )}
-
               {currentUser ? (
                 <button
                   onClick={() => setShowMobileProfileSheet(true)}

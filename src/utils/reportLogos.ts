@@ -1,8 +1,8 @@
 /**
  * Preset logo vectors and utilities for official Berita Acara Rekapitulasi
- * Layout:
- * - Kiri Kop: Logo Kegiatan (Pramuka, OSIS, Camp, dll)
- * - Kanan Kop: Logo Sekolah (SMPIT Pondok Duta, Tut Wuri Handayani, dll)
+ * Layout Resmi SMPIT Pondok Duta:
+ * - Kiri Kop: Logo Sekolah (SMPIT Pondok Duta, Tut Wuri Handayani, dll)
+ * - Kanan Kop: Logo Kegiatan / Cabang Lomba (Pramuka, OSIS, Duta Camp, Olahraga, dll)
  */
 
 export interface LogoPreset {

@@ -96,13 +96,27 @@ export interface ReportOfficialInfo {
   nip: string;
 }
 
+export interface UploadedLogo {
+  id: string;
+  name: string; // Nama logo yang diberikan saat unggah (misal: "Logo Futsal Putra", "Logo Duta Camp")
+  url: string; // URL gambar Google Drive atau Data URL
+  driveFileId?: string;
+  fileName?: string;
+  folderId?: string;
+  folderName?: string;
+  type?: 'sekolah' | 'kegiatan' | 'olahraga' | 'umum';
+  created_at?: string;
+}
+
 export interface ReportConfig {
   kepalaSekolah: ReportOfficialInfo;
   ketuaPanitia: ReportOfficialInfo;
   titimangsaKota: string;
-  logoSekolah: string; // Data URL or SVG
+  logoSekolah: string; // Data URL or SVG (Letak di Kiri Kop)
   logoSekolahType: string; // 'pondok_duta' | 'tut_wuri' | 'custom'
-  logoKegiatan: string; // Data URL or SVG
+  logoKegiatan: string; // Data URL or SVG (Letak di Kanan Kop)
   logoKegiatanType: string; // 'pramuka' | 'osis' | 'camp' | 'custom'
+  logoAplikasiHeader?: string; // Data URL or URL logo aplikasi di header website
+  uploadedLogos?: UploadedLogo[]; // Pustaka logo tersimpan di Google Drive / Cloud
 }
 

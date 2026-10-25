@@ -9,10 +9,12 @@ import {
   ScoreRecapItem,
   EventParticipantType,
   AssessmentType,
-  ReportConfig
+  ReportConfig,
+  UploadedLogo
 } from '../types';
 import { apiService } from '../services/apiService';
 import { LogoRenderer } from './LogoRenderer';
+import { UploadLogoModal } from './UploadLogoModal';
 import {
   LOGO_SEKOLAH_PONDOK_DUTA_SVG,
   LOGO_PRAMUKA_SVG,
@@ -200,6 +202,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isUploadingLogoKegiatan, setIsUploadingLogoKegiatan] = useState(false);
   const [isUploadingLogoSekolah, setIsUploadingLogoSekolah] = useState(false);
   const [isSavingReportConfig, setIsSavingReportConfig] = useState(false);
+  const [isUploadLogoModalOpen, setIsUploadLogoModalOpen] = useState(false);
+  const [uploadLogoTargetPos, setUploadLogoTargetPos] = useState<'kiri_sekolah' | 'kanan_kegiatan'>('kanan_kegiatan');
+  const [uploadLogoSuggestedName, setUploadLogoSuggestedName] = useState('');
+  const [uploadedLogosList, setUploadedLogosList] = useState<UploadedLogo[]>(() => {
+    const list = apiService.getUploadedLogos();
+    return Array.isArray(list) ? list.filter((l): l is UploadedLogo => Boolean(l && l.url && typeof l.url === 'string')) : [];
+  });
+  const [confirmDeleteLogoId, setConfirmDeleteLogoId] = useState<string | null>(null);
+
+  // Pustaka Logo: Murni hanya menampilkan logo hasil unggahan dari Google Drive (tidak ada logo preset dummy)
 
   // Feedback banner
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -703,92 +715,162 @@ export const AdminView: React.FC<AdminViewProps> = ({
     setTimeout(() => setBannerMsg(null), 2500);
   };
 
-  const handleUploadLogoKegiatan = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsUploadingLogoKegiatan(true);
-    setBannerMsg({ type: 'success', text: `Mengunggah Logo Kegiatan ke Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID})...` });
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        try {
-          const driveRes = await apiService.uploadLogoToDrive(dataUrl, `logo_kegiatan_${Date.now()}_${file.name}`, file.type || 'image/png');
-          const finalUrl = driveRes.success && driveRes.fileUrl ? driveRes.fileUrl : dataUrl;
-          const updated: ReportConfig = { ...reportConfig, logoKegiatan: finalUrl, logoKegiatanType: 'custom' };
-          setReportConfig(updated);
-          await apiService.saveReportConfig(updated);
-          onUpdateReportConfig?.(updated);
-
-          setBannerMsg({
-            type: 'success',
-            text: driveRes.success
-              ? `Alhamdulillah! Logo Kegiatan berhasil disimpan di Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID}) & Google Sheets.`
-              : 'Logo Kegiatan disimpan lokal (Upload Drive gagal atau belum terhubung).'
-          });
-        } catch (err: any) {
-          const updated: ReportConfig = { ...reportConfig, logoKegiatan: dataUrl, logoKegiatanType: 'custom' };
-          setReportConfig(updated);
-          apiService.saveReportConfig(updated);
-          onUpdateReportConfig?.(updated);
-          setBannerMsg({ type: 'error', text: `Gagal upload ke Drive (${err.message}), tersimpan secara lokal.` });
-        } finally {
-          setIsUploadingLogoKegiatan(false);
-          setTimeout(() => setBannerMsg(null), 4000);
-        }
-      } else {
-        setIsUploadingLogoKegiatan(false);
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleOpenUploadModal = (targetPos: 'kiri_sekolah' | 'kanan_kegiatan', defaultName: string = '') => {
+    setUploadLogoTargetPos(targetPos);
+    setUploadLogoSuggestedName(defaultName);
+    setIsUploadLogoModalOpen(true);
   };
 
-  const handleUploadLogoSekolah = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleLogoModalUploaded = (newLogo: UploadedLogo, targetPos: 'kiri_sekolah' | 'kanan_kegiatan', setAsHeader?: boolean) => {
+    const updatedLogos = [newLogo, ...uploadedLogosList.filter(l => l.id !== newLogo.id && l.name !== newLogo.name)];
+    setUploadedLogosList(updatedLogos);
 
-    setIsUploadingLogoSekolah(true);
-    setBannerMsg({ type: 'success', text: `Mengunggah Logo Sekolah ke Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID})...` });
+    let updatedConfig: ReportConfig;
+    if (targetPos === 'kiri_sekolah') {
+      updatedConfig = {
+        ...reportConfig,
+        logoSekolah: newLogo.url,
+        logoSekolahType: 'custom',
+        uploadedLogos: updatedLogos
+      };
+    } else {
+      updatedConfig = {
+        ...reportConfig,
+        logoKegiatan: newLogo.url,
+        logoKegiatanType: 'custom',
+        uploadedLogos: updatedLogos
+      };
+    }
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        try {
-          const driveRes = await apiService.uploadLogoToDrive(dataUrl, `logo_sekolah_${Date.now()}_${file.name}`, file.type || 'image/png');
-          const finalUrl = driveRes.success && driveRes.fileUrl ? driveRes.fileUrl : dataUrl;
-          const updated: ReportConfig = { ...reportConfig, logoSekolah: finalUrl, logoSekolahType: 'custom' };
-          setReportConfig(updated);
-          await apiService.saveReportConfig(updated);
-          onUpdateReportConfig?.(updated);
+    if (setAsHeader) {
+      updatedConfig.logoAplikasiHeader = newLogo.url;
+    }
 
-          setBannerMsg({
-            type: 'success',
-            text: driveRes.success
-              ? `Alhamdulillah! Logo Sekolah berhasil disimpan di Google Drive (Folder: ${DRIVE_LOGO_FOLDER_ID}) & Google Sheets.`
-              : 'Logo Sekolah disimpan lokal (Upload Drive gagal atau belum terhubung).'
-          });
-        } catch (err: any) {
-          const updated: ReportConfig = { ...reportConfig, logoSekolah: dataUrl, logoSekolahType: 'custom' };
-          setReportConfig(updated);
-          apiService.saveReportConfig(updated);
-          onUpdateReportConfig?.(updated);
-          setBannerMsg({ type: 'error', text: `Gagal upload ke Drive (${err.message}), tersimpan secara lokal.` });
-        } finally {
-          setIsUploadingLogoSekolah(false);
-          setTimeout(() => setBannerMsg(null), 4000);
-        }
+    setReportConfig(updatedConfig);
+    apiService.saveReportConfig(updatedConfig);
+    onUpdateReportConfig?.(updatedConfig);
+    setBannerMsg({
+      type: 'success',
+      text: `Logo "${newLogo.name}" berhasil diunggah ke Google Drive dan langsung diterapkan${setAsHeader ? ' di Kop dan Header Website' : ''}!`
+    });
+    setTimeout(() => setBannerMsg(null), 3500);
+  };
+
+  const handleApplyLibraryLogo = async (logo: UploadedLogo, targetPos: 'kiri_sekolah' | 'kanan_kegiatan' | 'header_app') => {
+    if (!logo || !logo.url) return;
+    if (targetPos === 'header_app') {
+      const isAlreadyActive = reportConfig.logoAplikasiHeader === logo.url;
+      let updated: ReportConfig;
+      if (isAlreadyActive) {
+        // Toggle off: hapus logo kustom header, kembali ke ikon api bawaan
+        const { logoAplikasiHeader: _, ...rest } = reportConfig;
+        updated = {
+          ...rest,
+          logoAplikasiHeader: undefined
+        };
+        setBannerMsg({ type: 'success', text: `Centang dilepas. Logo Aplikasi di Header Website dikembalikan ke ikon bawaan.` });
       } else {
-        setIsUploadingLogoSekolah(false);
+        // Toggle on: pasang logo ini di Header Website
+        updated = {
+          ...reportConfig,
+          logoAplikasiHeader: logo.url
+        };
+        setBannerMsg({ type: 'success', text: `Logo "${logo.name}" berhasil diterapkan sebagai Logo Aplikasi di Header Website!` });
       }
-    };
-    reader.readAsDataURL(file);
+      setReportConfig(updated);
+      await apiService.saveReportConfig(updated);
+      onUpdateReportConfig?.(updated);
+      setTimeout(() => setBannerMsg(null), 3000);
+      return;
+    }
+
+    if (targetPos === 'kiri_sekolah') {
+      const isAlreadyActive = reportConfig.logoSekolah === logo.url;
+      let updated: ReportConfig;
+      if (isAlreadyActive) {
+        // Toggle off: kembalikan ke preset sekolah bawaan
+        updated = {
+          ...reportConfig,
+          logoSekolah: LOGO_SEKOLAH_PONDOK_DUTA_SVG,
+          logoSekolahType: 'pondok_duta'
+        };
+        setBannerMsg({ type: 'success', text: `Centang dilepas. Logo Kiri dikembalikan ke Logo Bawaan SMPIT Pondok Duta.` });
+      } else {
+        // Toggle on: terapkan logo ini
+        updated = {
+          ...reportConfig,
+          logoSekolah: logo.url,
+          logoSekolahType: 'custom'
+        };
+        setBannerMsg({ type: 'success', text: `Logo Sekolah diganti ke "${logo.name}" (Kiri Kop).` });
+      }
+      setReportConfig(updated);
+      await apiService.saveReportConfig(updated);
+      onUpdateReportConfig?.(updated);
+    } else {
+      const isAlreadyActive = reportConfig.logoKegiatan === logo.url;
+      let updated: ReportConfig;
+      if (isAlreadyActive) {
+        // Toggle off: kembalikan ke preset kegiatan bawaan (Pramuka)
+        updated = {
+          ...reportConfig,
+          logoKegiatan: LOGO_PRAMUKA_SVG,
+          logoKegiatanType: 'pramuka'
+        };
+        setBannerMsg({ type: 'success', text: `Centang dilepas. Logo Kanan dikembalikan ke Logo Bawaan Kegiatan (Pramuka).` });
+      } else {
+        // Toggle on: terapkan logo ini
+        updated = {
+          ...reportConfig,
+          logoKegiatan: logo.url,
+          logoKegiatanType: 'custom'
+        };
+        setBannerMsg({ type: 'success', text: `Logo Kegiatan diganti ke "${logo.name}" (Kanan Kop).` });
+      }
+      setReportConfig(updated);
+      await apiService.saveReportConfig(updated);
+      onUpdateReportConfig?.(updated);
+    }
+    setTimeout(() => setBannerMsg(null), 3000);
+  };
+
+  const handleConfirmDeleteLogo = async (logo: UploadedLogo) => {
+    if (!logo || !logo.id) return;
+    await apiService.deleteUploadedLogo(logo.id);
+    const updated = uploadedLogosList.filter(l => l.id !== logo.id);
+    setUploadedLogosList(updated);
+
+    // Jika logo yang dihapus sedang terpilih di kop kiri, kanan, atau header, reset
+    let needConfigUpdate = false;
+    const newConfig = { ...reportConfig, uploadedLogos: updated };
+    if (reportConfig.logoSekolah === logo.url) {
+      newConfig.logoSekolah = LOGO_SEKOLAH_PONDOK_DUTA_SVG;
+      newConfig.logoSekolahType = 'pondok_duta';
+      needConfigUpdate = true;
+    }
+    if (reportConfig.logoKegiatan === logo.url) {
+      newConfig.logoKegiatan = LOGO_PRAMUKA_SVG;
+      newConfig.logoKegiatanType = 'pramuka';
+      needConfigUpdate = true;
+    }
+    if (reportConfig.logoAplikasiHeader === logo.url) {
+      newConfig.logoAplikasiHeader = undefined;
+      needConfigUpdate = true;
+    }
+
+    if (needConfigUpdate) {
+      setReportConfig(newConfig);
+      await apiService.saveReportConfig(newConfig);
+      onUpdateReportConfig?.(newConfig);
+    }
+
+    setConfirmDeleteLogoId(null);
+    setBannerMsg({ type: 'success', text: `Logo "${logo.name}" telah dihapus dari pustaka tersimpan.` });
+    setTimeout(() => setBannerMsg(null), 2500);
   };
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-4 pb-2">
       {/* Top Banner Alert */}
       {bannerMsg && (
         <div
@@ -1265,214 +1347,265 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
             {showReportConfigSection && (
               <div className="p-5 sm:p-6 space-y-6">
-                {/* 1. BAGIAN LOGO KOP REKAPITULASI (KIRI = KEGIATAN, KANAN = SEKOLAH) */}
+                {/* 1. BAGIAN PUSTAKA LOGO KOP REKAPITULASI (KIRI = SEKOLAH, KANAN = KEGIATAN) */}
                 <div>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-2 mb-4 gap-1">
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <ImageIcon className="w-4 h-4 text-emerald-800" />
-                      <span>1. Pengisian Logo Kop Rekapitulasi</span>
-                    </h4>
-                    <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-md">
-                      Tata Letak Kop Resmi: <strong>Kiri = Logo Kegiatan</strong> · <strong>Kanan = Logo Sekolah</strong>
-                    </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-2 mb-4 gap-2">
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                        <ImageIcon className="w-4 h-4 text-emerald-800" />
+                        <span>1. Pustaka Logo Kop Rekapitulasi &amp; Header</span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          {uploadedLogosList.length} Logo Google Drive
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Pilih logo untuk <strong>Kiri Kop (Sekolah)</strong>, <strong>Kanan Kop (Kegiatan/Cabang Olahraga)</strong>, atau <strong>Header Website</strong>. Murni menggunakan berkas unggahan Anda di Google Drive.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenUploadModal('kanan_kegiatan', 'Logo Cabang Olahraga')}
+                        className="px-3.5 py-1.5 bg-emerald-800 hover:bg-emerald-700 active:scale-98 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-amber-300" />
+                        <span>+ Unggah Logo Baru</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {/* LOGO KEGIATAN (KIRI KOP) */}
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block"></span>
-                          Logo Kegiatan (Letak di Kiri Kop)
-                        </span>
-                        <span className="text-[10px] text-emerald-800 font-semibold px-2 py-0.5 bg-emerald-100 rounded">
-                          Kiri Kop
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 bg-white rounded-lg border-2 border-emerald-700/30 p-1 flex items-center justify-center shrink-0 shadow-xs">
-                          <LogoRenderer logo={reportConfig.logoKegiatan} alt="Logo Kegiatan" className="w-14 h-14 object-contain" />
+                  {/* PUSTAKA LOGO TERSIMPAN (MURNI HASIL UNGGAHAN GOOGLE DRIVE) */}
+                  <div className="p-4 bg-slate-50/80 rounded-xl border border-slate-200 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                          <Cloud className="w-4 h-4 text-emerald-700" />
+                          <span>Daftar Pustaka Logo Hasil Unggahan (Google Drive "Logo dan Laporan")</span>
                         </div>
-                        <div className="space-y-2 flex-1">
-                          <div className="text-[11px] font-medium text-slate-600">Pilih Preset Logo Kegiatan:</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPresetKegiatan('pramuka', LOGO_PRAMUKA_SVG)}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                reportConfig.logoKegiatanType === 'pramuka'
-                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              🏕️ Pramuka
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPresetKegiatan('osis', LOGO_OSIS_SVG)}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                reportConfig.logoKegiatanType === 'osis'
-                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              🦅 OSIS SMP
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPresetKegiatan('camp', LOGO_CAMP_SVG)}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                reportConfig.logoKegiatanType === 'camp'
-                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              🔥 Duta Camp
-                            </button>
-                          </div>
-
-                          <div className="pt-1 flex flex-col gap-1.5">
-                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors w-fit">
-                              {isUploadingLogoKegiatan ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
-                                  <span className="font-semibold text-emerald-800">Menyimpan ke Google Drive...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="w-3.5 h-3.5 text-emerald-800" />
-                                  <span>Unggah File Logo Kegiatan (PNG/JPG)</span>
-                                </>
-                              )}
-                              <input
-                                type="file"
-                                accept="image/*"
-                                disabled={isUploadingLogoKegiatan}
-                                onChange={handleUploadLogoKegiatan}
-                                className="hidden"
-                              />
-                            </label>
-                            {(reportConfig.logoKegiatan.includes('google') || reportConfig.logoKegiatan.includes('lh3') || reportConfig.logoKegiatanType === 'custom') && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 font-medium">
-                                <Cloud className="w-3 h-3 text-emerald-600 shrink-0" />
-                                <span>Tersimpan di Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>)</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        <p className="text-[10.5px] text-slate-500 mt-0.5">
+                          Klik <strong>"Pilih Kiri"</strong> (Kop Sekolah), <strong>"Pilih Kanan"</strong> (Kop Kegiatan/Cabang Olahraga), atau <strong>"Pilih Header"</strong> (Logo Aplikasi di Header Website). Klik tombol yang aktif untuk melepas centang.
+                        </p>
                       </div>
-                      <p className="text-[10px] text-slate-500 italic">
-                        * Ditampilkan di pojok kiri atas kop surat lembar berita acara rekapitulasi PDF.
-                      </p>
                     </div>
 
-                    {/* LOGO SEKOLAH (KANAN KOP) */}
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
-                          Logo Sekolah (Letak di Kanan Kop)
-                        </span>
-                        <span className="text-[10px] text-amber-800 font-semibold px-2 py-0.5 bg-amber-100 rounded">
-                          Kanan Kop
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 bg-white rounded-lg border-2 border-emerald-700/30 p-1 flex items-center justify-center shrink-0 shadow-xs">
-                          <LogoRenderer logo={reportConfig.logoSekolah} alt="Logo Sekolah" className="w-14 h-14 object-contain" />
+                    {uploadedLogosList.length === 0 ? (
+                      <div className="p-8 text-center bg-white border-2 border-dashed border-slate-200 rounded-xl space-y-2.5">
+                        <div className="w-12 h-12 mx-auto rounded-full bg-emerald-50 text-emerald-700 flex items-center justify-center">
+                          <Cloud className="w-6 h-6" />
                         </div>
-                        <div className="space-y-2 flex-1">
-                          <div className="text-[11px] font-medium text-slate-600">Pilih Preset Logo Sekolah:</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPresetSekolah('pondok_duta', LOGO_SEKOLAH_PONDOK_DUTA_SVG)}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                reportConfig.logoSekolahType === 'pondok_duta'
-                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              🏫 SMPIT Pondok Duta
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSelectPresetSekolah('tut_wuri', LOGO_TUT_WURI_SVG)}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-all cursor-pointer ${
-                                reportConfig.logoSekolahType === 'tut_wuri'
-                                  ? 'bg-emerald-900 text-white border-emerald-900 shadow-xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              🎓 Tut Wuri Handayani
-                            </button>
-                          </div>
+                        <div className="text-xs font-bold text-slate-800">
+                          Belum Ada Logo Hasil Unggahan
+                        </div>
+                        <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                          Semua logo dummy telah dibersihkan. Silakan klik tombol <strong>"+ Unggah Logo Baru"</strong> di atas untuk mengunggah logo ke Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>).
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUploadModal('kanan_kegiatan', 'Logo Cabang Olahraga')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs cursor-pointer mt-1"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Unggah Logo Pertama</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {uploadedLogosList.filter((logo): logo is UploadedLogo => Boolean(logo && logo.url)).map((logo) => {
+                          const isUsedKanan = reportConfig.logoKegiatan === logo.url;
+                          const isUsedKiri = reportConfig.logoSekolah === logo.url;
+                          const isUsedHeader = reportConfig.logoAplikasiHeader === logo.url;
 
-                          <div className="pt-1 flex flex-col gap-1.5">
-                            <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg cursor-pointer transition-colors w-fit">
-                              {isUploadingLogoSekolah ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
-                                  <span className="font-semibold text-emerald-800">Menyimpan ke Google Drive...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="w-3.5 h-3.5 text-emerald-800" />
-                                  <span>Unggah File Logo Sekolah (PNG/JPG)</span>
-                                </>
-                              )}
-                              <input
-                                type="file"
-                                accept="image/*"
-                                disabled={isUploadingLogoSekolah}
-                                onChange={handleUploadLogoSekolah}
-                                className="hidden"
-                              />
-                            </label>
-                            {(reportConfig.logoSekolah.includes('google') || reportConfig.logoSekolah.includes('lh3') || reportConfig.logoSekolahType === 'custom') && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-emerald-800 font-medium">
-                                <Cloud className="w-3 h-3 text-emerald-600 shrink-0" />
-                                <span>Tersimpan di Google Drive (Folder ID: <span className="font-mono">{DRIVE_LOGO_FOLDER_ID}</span>)</span>
+                          return (
+                            <div
+                              key={logo.id}
+                              className={`p-3 rounded-xl border bg-white flex items-center justify-between gap-3 shadow-xs transition-all ${
+                                isUsedKanan || isUsedKiri || isUsedHeader
+                                  ? 'border-emerald-500 ring-1 ring-emerald-500/30'
+                                  : 'border-slate-200 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 p-1 flex items-center justify-center shrink-0 shadow-2xs">
+                                <LogoRenderer logo={logo.url} alt={logo.name} className="w-10 h-10 object-contain" />
                               </div>
-                            )}
-                          </div>
-                        </div>
+
+                              <div className="flex-1 min-w-0 space-y-1">
+                                <div className="text-xs font-bold text-slate-900 truncate" title={logo.name}>
+                                  {logo.name}
+                                </div>
+                                <div className="flex items-center gap-1.5 text-[10px] text-slate-500 truncate">
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                                    Google Drive
+                                  </span>
+                                  <span className="truncate">{logo.fileName || `${logo.name}.png`}</span>
+                                </div>
+
+                                {/* Active Badges */}
+                                {(isUsedKiri || isUsedKanan || isUsedHeader) && (
+                                  <div className="flex flex-wrap gap-1 text-[9px] pt-0.5">
+                                    {isUsedKiri && (
+                                      <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 font-bold border border-amber-300">
+                                        Kop Kiri
+                                      </span>
+                                    )}
+                                    {isUsedKanan && (
+                                      <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-900 font-bold border border-emerald-300">
+                                        Kop Kanan
+                                      </span>
+                                    )}
+                                    {isUsedHeader && (
+                                      <span className="px-1.5 py-0.2 rounded bg-teal-100 text-teal-900 font-bold border border-teal-300">
+                                        Header Web
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Pilihan Cekmark / Tombol Aksi */}
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                  {/* 1. Kanan Kop (Kegiatan) */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyLibraryLogo(logo, 'kanan_kegiatan')}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-0.5 ${
+                                      isUsedKanan
+                                        ? 'bg-emerald-800 text-white shadow-xs ring-1 ring-emerald-950'
+                                        : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200'
+                                    }`}
+                                    title={isUsedKanan ? 'Aktif di Kanan Kop. Klik untuk melepas centang.' : 'Terapkan sebagai Logo Kanan (Kegiatan/Cabang Olahraga)'}
+                                  >
+                                    {isUsedKanan ? '✓ Kanan (Lepas)' : 'Pilih Kanan'}
+                                  </button>
+
+                                  {/* 2. Kiri Kop (Sekolah) */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyLibraryLogo(logo, 'kiri_sekolah')}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-0.5 ${
+                                      isUsedKiri
+                                        ? 'bg-amber-600 text-white shadow-xs ring-1 ring-amber-800'
+                                        : 'bg-amber-50 text-amber-900 hover:bg-amber-100 border border-amber-200'
+                                    }`}
+                                    title={isUsedKiri ? 'Aktif di Kiri Kop. Klik untuk melepas centang.' : 'Terapkan sebagai Logo Kiri (Sekolah)'}
+                                  >
+                                    {isUsedKiri ? '✓ Kiri (Lepas)' : 'Pilih Kiri'}
+                                  </button>
+
+                                  {/* 3. Header Website */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplyLibraryLogo(logo, 'header_app')}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer flex items-center gap-0.5 ${
+                                      isUsedHeader
+                                        ? 'bg-teal-700 text-white shadow-xs ring-1 ring-teal-950'
+                                        : 'bg-teal-50 text-teal-900 hover:bg-teal-100 border border-teal-200'
+                                    }`}
+                                    title={isUsedHeader ? 'Aktif sebagai Logo Header Website. Klik untuk melepas centang.' : 'Terapkan sebagai Logo Aplikasi di Header Website (Navbar)'}
+                                  >
+                                    {isUsedHeader ? '✓ Header (Lepas)' : 'Pilih Header'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {confirmDeleteLogoId === logo.id ? (
+                                <div className="flex items-center gap-1 shrink-0 animate-in fade-in duration-150">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleConfirmDeleteLogo(logo)}
+                                    className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold shadow-xs cursor-pointer"
+                                    title="Hapus permanen dari pustaka"
+                                  >
+                                    Hapus
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteLogoId(null)}
+                                    className="px-1.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-semibold cursor-pointer"
+                                    title="Batal"
+                                  >
+                                    Batal
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteLogoId(logo.id)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                                  title="Hapus logo dari pustaka"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                      <p className="text-[10px] text-slate-500 italic">
-                        * Ditampilkan di pojok kanan atas kop surat lembar berita acara rekapitulasi PDF.
-                      </p>
-                    </div>
+                    )}
                   </div>
 
                   {/* MINI LIVE PREVIEW OF KOP */}
                   <div className="mt-4 p-4 bg-white rounded-xl border border-slate-200 shadow-xs">
                     <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Pratinjau Langsung Kop Rekapitulasi:
+                      Pratinjau Langsung Kop Rekapitulasi Resmi:
                     </div>
-                    <div className="flex items-center justify-between gap-4 p-2 bg-slate-50/50 rounded-lg border border-slate-200">
-                      {/* Kiri: Logo Kegiatan */}
-                      <div className="w-12 h-12 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
-                        <LogoRenderer logo={reportConfig.logoKegiatan} alt="Logo Kegiatan" className="w-10 h-10 object-contain" />
+                    <div className="flex items-center justify-between gap-4 p-3 bg-slate-50/70 rounded-lg border border-slate-200">
+                      {/* KIRI: Logo Sekolah */}
+                      <div className="w-14 h-14 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
+                        <LogoRenderer logo={reportConfig.logoSekolah} alt="Logo Sekolah" className="w-12 h-12 object-contain" />
                       </div>
 
-                      {/* Tengah: Teks Kop */}
+                      {/* TENGAH: Teks Kop */}
                       <div className="flex-1 text-center">
                         <div className="text-[9px] font-bold uppercase text-slate-600">YAYASAN PONDOK DUTA</div>
-                        <div className="text-xs font-extrabold uppercase text-emerald-950">SMP ISLAM TERPADU PONDOK DUTA</div>
+                        <div className="text-xs sm:text-sm font-extrabold uppercase text-emerald-950">SMP ISLAM TERPADU PONDOK DUTA</div>
                         <div className="text-[10px] font-bold text-slate-800">GUGUS DEPAN GERAKAN PRAMUKA / PANITIA KEGIATAN</div>
-                        <div className="text-[8px] text-slate-500">Jl. Duta Indah No. 1, Cisalak Pasar, Cimanggis, Kota Depok</div>
+                        <div className="text-[8.5px] text-slate-500">Jl. Duta Indah No. 1, Cisalak Pasar, Cimanggis, Kota Depok</div>
                       </div>
 
-                      {/* Kanan: Logo Sekolah */}
-                      <div className="w-12 h-12 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
-                        <LogoRenderer logo={reportConfig.logoSekolah} alt="Logo Sekolah" className="w-10 h-10 object-contain" />
+                      {/* KANAN: Logo Kegiatan */}
+                      <div className="w-14 h-14 shrink-0 flex items-center justify-center p-0.5 bg-white border border-slate-200 rounded">
+                        <LogoRenderer logo={reportConfig.logoKegiatan} alt="Logo Kegiatan" className="w-12 h-12 object-contain" />
                       </div>
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2.5">
                       <div className="h-[2px] bg-emerald-950 w-full mb-[1px]"></div>
                       <div className="h-[0.5px] bg-emerald-950 w-full"></div>
+                    </div>
+
+                    {/* PRATINJAU LOGO APLIKASI HEADER WEBSITE */}
+                    <div className="mt-3 p-3 bg-slate-50/70 rounded-lg border border-slate-200 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-white p-1 flex items-center justify-center border border-slate-200 shadow-xs shrink-0">
+                          {reportConfig.logoAplikasiHeader ? (
+                            <img src={reportConfig.logoAplikasiHeader} alt="Header" className="w-full h-full object-contain" />
+                          ) : (
+                            <Trophy className="w-5 h-5 text-amber-500" />
+                          )}
+                        </div>
+                        <div className="min-w-0 text-left">
+                          <div className="text-[11px] font-bold text-slate-900 truncate">
+                            Logo Header Website: {reportConfig.logoAplikasiHeader ? 'Logo Kustom Aktif (Background Putih)' : 'Lambang Piala Bawaan (Default)'}
+                          </div>
+                          <div className="text-[9.5px] text-slate-500 truncate">
+                            Ditampilkan pada bilah navigasi website dengan latar belakang putih bersih agar tulisan logo terbaca jelas
+                          </div>
+                        </div>
+                      </div>
+                      {reportConfig.logoAplikasiHeader && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const updated = { ...reportConfig, logoAplikasiHeader: undefined };
+                            setReportConfig(updated);
+                            await apiService.saveReportConfig(updated);
+                            onUpdateReportConfig?.(updated);
+                            setBannerMsg({ type: 'success', text: 'Logo Header Website dikembalikan ke lambang piala bawaan.' });
+                            setTimeout(() => setBannerMsg(null), 2500);
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-semibold shrink-0 cursor-pointer shadow-2xs"
+                        >
+                          Lepas Header
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3986,6 +4119,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Upload Logo Modal with Name input and Google Drive folder storage */}
+      <UploadLogoModal
+        isOpen={isUploadLogoModalOpen}
+        onClose={() => setIsUploadLogoModalOpen(false)}
+        onLogoUploaded={handleLogoModalUploaded}
+        defaultPosition={uploadLogoTargetPos}
+        suggestedName={uploadLogoSuggestedName || (uploadLogoTargetPos === 'kiri_sekolah' ? 'Logo SMPIT Pondok Duta' : 'Logo Cabang Olahraga')}
+      />
     </div>
   );
 };

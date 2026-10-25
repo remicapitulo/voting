@@ -20,7 +20,7 @@ var SHEETS = {
   CONFIG: 'Config'
 };
 
-// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta)
+// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta - Logo dan Laporan)
 var DRIVE_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';
 
 var SCHEMAS = [
@@ -1037,19 +1037,68 @@ function handleUpdateCategoryCriteria(data) {
 
 /**
  * =========================================================================
+ * FUNGSI AKTIVASI IZIN GOOGLE DRIVE (PENTING DIBACA)
+ * =========================================================================
+ * Jika muncul error: "You do not have permission to call DriveApp...",
+ * ikuti langkah mudah berikut:
+ * 1. Di editor Apps Script, pada dropdown fungsi di samping tombol "Run / Jalankan",
+ *    pilih fungsi "authorizeDriveApp".
+ * 2. Klik tombol ▶ "Run" (Jalankan).
+ * 3. Google akan menampilkan popup "Authorization Required" (Izin Diperlukan).
+ * 4. Klik "Review Permissions" -> Pilih Akun Google Anda -> Klik "Advanced" -> Klik "Go to ... (unsafe)" -> Klik "Allow".
+ * 5. Buat deployment versi baru:
+ *    Klik "Deploy" -> "Manage deployments" -> Ikon Pensil (Edit) -> Versi: "New version" -> Klik "Deploy".
+ */
+function authorizeDriveApp() {
+  try {
+    var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+    // PENTING: Wajib memanggil createFile agar Google Apps Script memicu popup izin TULIS (WRITE): https://www.googleapis.com/auth/drive
+    var testFile = folder.createFile('auth_test.txt', 'Otorisasi Google Drive Berhasil');
+    testFile.setTrashed(true); // Langsung pindahkan file pengujian ke sampah
+    Logger.log('Otorisasi Google Drive Berhasil Penuh! Hak tulis (createFile) aktif di folder: ' + folder.getName() + ' (ID: ' + folder.getId() + ')');
+    return 'Otorisasi Berhasil Penuh: ' + folder.getName();
+  } catch (e) {
+    Logger.log('Error otorisasi Drive: ' + e);
+    throw e;
+  }
+}
+
+/**
+ * =========================================================================
  * GOOGLE DRIVE LOGO & ASSET UPLOADER
  * Menyimpan Logo Sekolah / Kegiatan ke Google Drive Folder Khusus
- * Folder ID Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7
+ * Folder ID Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7 (Logo dan Laporan)
  * =========================================================================
  */
 function handleUploadLogoToDrive(data) {
   try {
     var targetFolderId = String(data.folderId || DRIVE_FOLDER_ID).trim();
-    var folder;
+    if (!targetFolderId) {
+      targetFolderId = DRIVE_FOLDER_ID;
+    }
+
+    var folder = null;
     try {
       folder = DriveApp.getFolderById(targetFolderId);
-    } catch (folderErr) {
-      folder = DriveApp.getRootFolder();
+    } catch (err1) {
+      var errStr = err1.toString();
+      if (errStr.indexOf('permission') > -1 || errStr.indexOf('DriveApp') > -1) {
+        return {
+          status: 'error',
+          message: 'Izin Google Drive belum diaktifkan di Google Apps Script. Solusi: Buka editor Apps Script, pilih fungsi "authorizeDriveApp", klik Run/Jalankan, lalu klik "Allow" dan Deploy versi baru.'
+        };
+      }
+      return {
+        status: 'error',
+        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak dapat diakses: ' + errStr + '. Pastikan folder dibagikan (Shared) dengan akun Google ini sebagai Editor.'
+      };
+    }
+
+    if (!folder) {
+      return {
+        status: 'error',
+        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak ditemukan. Pastikan folder sudah dibuat dan dapat diakses.'
+      };
     }
 
     var base64Data = data.base64 || data.base64Data || '';
@@ -1062,7 +1111,28 @@ function handleUploadLogoToDrive(data) {
     }
 
     var mimeType = data.mimeType || 'image/png';
-    var fileName = data.fileName || ('logo-' + new Date().getTime() + '.png');
+    var logoTitle = String(data.logoTitle || data.name || '').trim();
+    
+    // Tentukan ekstensi file
+    var ext = '.png';
+    if (mimeType.indexOf('jpeg') > -1 || mimeType.indexOf('jpg') > -1) {
+      ext = '.jpg';
+    } else if (mimeType.indexOf('svg') > -1) {
+      ext = '.svg';
+    } else if (mimeType.indexOf('webp') > -1) {
+      ext = '.webp';
+    }
+
+    // Tentukan nama file rapi di Google Drive sesuai input nama pengguna
+    var fileName = '';
+    if (logoTitle) {
+      var safeTitle = logoTitle.replace(/[\\/:*?"<>|]/g, ' ').trim();
+      fileName = safeTitle + ext;
+    } else if (data.fileName) {
+      fileName = data.fileName;
+    } else {
+      fileName = 'logo_' + new Date().getTime() + ext;
+    }
 
     var decodedBytes = Utilities.base64Decode(base64Data);
     var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
@@ -1078,16 +1148,92 @@ function handleUploadLogoToDrive(data) {
     var directViewUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
     var downloadUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
 
+    var logoEntry = {
+      id: 'logo_' + fileId,
+      name: logoTitle || fileName.replace(/\.[^/.]+$/, ""),
+      url: directViewUrl,
+      driveFileId: fileId,
+      fileName: file.getName(),
+      folderId: folder.getId(),
+      folderName: folder.getName(),
+      type: data.type || 'olahraga',
+      created_at: new Date().toISOString()
+    };
+
+    // Otomatis simpan logo baru ke pustaka logo (Config sheet)
+    saveUploadedLogoToConfig(logoEntry);
+
     return {
       status: 'success',
       fileId: fileId,
       fileUrl: directViewUrl,
       downloadUrl: downloadUrl,
-      fileName: fileName,
-      message: 'Logo berhasil diunggah dan disimpan ke Google Drive!'
+      fileName: file.getName(),
+      folderName: folder.getName(),
+      folderId: folder.getId(),
+      logoEntry: logoEntry,
+      message: 'Logo "' + logoEntry.name + '" berhasil diunggah ke Google Drive di folder "' + folder.getName() + '"!'
     };
   } catch (err) {
     return { status: 'error', message: 'Gagal mengunggah logo ke Google Drive: ' + err.toString() };
+  }
+}
+
+/**
+ * Menyimpan metadata logo yang berhasil diunggah ke Config Sheet agar tersinkronisasi ke seluruh perangkat
+ */
+function saveUploadedLogoToConfig(logoEntry) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+      sheet.appendRow(['key', 'value', 'updated_at']);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+    }
+
+    var currentList = [];
+    var rows = sheet.getDataRange().getValues();
+    var rowIndex = -1;
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        rowIndex = r + 1;
+        try {
+          currentList = JSON.parse(rows[r][1]);
+          if (!Array.isArray(currentList)) currentList = [];
+        } catch (e) {
+          currentList = [];
+        }
+        break;
+      }
+    }
+
+    // Cek apakah logo dengan fileId sama sudah ada
+    var existingIdx = -1;
+    for (var i = 0; i < currentList.length; i++) {
+      if (currentList[i].driveFileId === logoEntry.driveFileId || currentList[i].name === logoEntry.name) {
+        existingIdx = i;
+        break;
+      }
+    }
+
+    if (existingIdx > -1) {
+      currentList[existingIdx] = logoEntry;
+    } else {
+      currentList.unshift(logoEntry);
+    }
+
+    var ts = new Date().toISOString();
+    var valStr = JSON.stringify(currentList);
+
+    if (rowIndex > -1) {
+      sheet.getRange(rowIndex, 2).setValue(valStr);
+      sheet.getRange(rowIndex, 3).setValue(ts);
+    } else {
+      sheet.appendRow(['uploaded_logos', valStr, ts]);
+    }
+  } catch (err) {
+    Logger.log('Gagal menyimpan logo ke Config sheet: ' + err);
   }
 }
 
