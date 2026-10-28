@@ -67,6 +67,7 @@ import {
 } from 'lucide-react';
 import { getFallbackCriteria, DRIVE_LOGO_FOLDER_ID } from '../services/apiService';
 import { getTeamInitials } from '../utils/initials';
+import { TikTokIcon, YouTubeIcon, InstagramIcon, LiveRadioIcon } from './LiveStreamIcons';
 
 interface AdminViewProps {
   event: EventModel;
@@ -78,7 +79,7 @@ interface AdminViewProps {
   publicVotes: PublicVote[];
   currentUser: User | null;
   onOpenPrintReport: (categoryId: string, recapData: ScoreRecapItem[], weights: { jury: number; public: number }) => void;
-  onRefreshData: () => void;
+  onRefreshData: (syncFromCloud?: boolean) => Promise<void> | void;
   onSelectEvent?: (eventId: string) => void;
   reportConfig?: ReportConfig;
   onUpdateReportConfig?: (newConfig: ReportConfig) => void;
@@ -246,6 +247,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [editingCategory, setEditingCategory] = useState<CategoryModel | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<CategoryModel | null>(null);
   const [isSyncingCategory, setIsSyncingCategory] = useState(false);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
 
   // New Category form state
   const [newCatName, setNewCatName] = useState('');
@@ -260,6 +263,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
     'Penguasaan materi & penampilan\nKekompakan & kedisiplinan\nKreativitas & originalitas'
   );
   const [newCatAssignedJuries, setNewCatAssignedJuries] = useState<string[]>([]);
+  const [newCatLiveTiktok, setNewCatLiveTiktok] = useState('');
+  const [newCatLiveYoutube, setNewCatLiveYoutube] = useState('');
+  const [newCatLiveInstagram, setNewCatLiveInstagram] = useState('');
+  const [newCatVotingStart, setNewCatVotingStart] = useState('');
+  const [newCatVotingEnd, setNewCatVotingEnd] = useState('');
   const [isPurging, setIsPurging] = useState(false);
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
@@ -536,7 +544,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // =========================================================================
   // CABANG LOMBA (CATEGORY) HANDLERS
   // =========================================================================
-  const handleCreateCategory = (e: React.FormEvent) => {
+  const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCatName.trim()) {
       setBannerMsg({ type: 'error', text: 'Nama Cabang Lomba wajib diisi.' });
@@ -555,36 +563,53 @@ export const AdminView: React.FC<AdminViewProps> = ({
     ];
 
     const targetEventId = newCatEventId || selectedAdminSubEventId;
-    const res = apiService.addCategory({
-      id_event: targetEventId,
-      nama_kategori: newCatName.trim(),
-      deskripsi: newCatDesc.trim() || `Cabang lomba ${newCatName.trim()} SMPIT Pondok Duta`,
-      tipe: newCatType || 'Umum',
-      tipe_peserta: newCatParticipantType,
-      assessment_type: newCatAssessmentType,
-      votes_required: newCatAssessmentType === 'jury_only' ? 1 : newCatVotesRequired,
-      iconName: newCatIconName || 'Flame',
-      kriteria,
-      assigned_juries: newCatAssessmentType === 'public_only' ? [] : newCatAssignedJuries
-    });
+    setIsCreatingCategory(true);
+    try {
+      const res = await apiService.addCategory({
+        id_event: targetEventId,
+        nama_kategori: newCatName.trim(),
+        deskripsi: newCatDesc.trim() || `Cabang lomba ${newCatName.trim()} SMPIT Pondok Duta`,
+        tipe: newCatType || 'Umum',
+        tipe_peserta: newCatParticipantType,
+        assessment_type: newCatAssessmentType,
+        votes_required: newCatAssessmentType === 'jury_only' ? 1 : newCatVotesRequired,
+        iconName: newCatIconName || 'Flame',
+        kriteria,
+        assigned_juries: newCatAssessmentType === 'public_only' ? [] : newCatAssignedJuries,
+        live_tiktok: newCatLiveTiktok.trim(),
+        live_youtube: newCatLiveYoutube.trim(),
+        live_instagram: newCatLiveInstagram.trim(),
+        voting_start: newCatVotingStart.trim(),
+        voting_end: newCatVotingEnd.trim()
+      });
 
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      setShowAddCategoryModal(false);
-      setNewCatName('');
-      setNewCatDesc('');
-      setNewCatAssignedJuries([]);
-      if (res.category) {
-        setSelectedCategoryId(res.category.id_kategori);
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setShowAddCategoryModal(false);
+        setNewCatName('');
+        setNewCatDesc('');
+        setNewCatAssignedJuries([]);
+        setNewCatLiveTiktok('');
+        setNewCatLiveYoutube('');
+        setNewCatLiveInstagram('');
+        setNewCatVotingStart('');
+        setNewCatVotingEnd('');
+        if (res.category) {
+          setSelectedCategoryId(res.category.id_kategori);
+        }
+        await onRefreshData(true);
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
       }
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3500);
-    } else {
-      setBannerMsg({ type: 'error', text: res.message });
+    } catch (err: any) {
+      setBannerMsg({ type: 'error', text: err.message || 'Gagal menambahkan cabang lomba' });
+    } finally {
+      setIsCreatingCategory(false);
     }
   };
 
-  const handleUpdateCategory = (e: React.FormEvent) => {
+  const handleUpdateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingCategory) return;
     if (!editingCategory.nama_kategori.trim()) {
@@ -592,14 +617,29 @@ export const AdminView: React.FC<AdminViewProps> = ({
       return;
     }
 
-    const res = apiService.updateCategory(editingCategory);
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      setEditingCategory(null);
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3500);
-    } else {
-      setBannerMsg({ type: 'error', text: res.message });
+    let criteriaToSave = (editingCategory.kriteria || []).map(k => k.trim()).filter(k => k.length > 0);
+    if (editingCategory.assessment_type !== 'public_only' && criteriaToSave.length === 0) {
+      criteriaToSave = getFallbackCriteria(editingCategory.id_kategori, editingCategory.nama_kategori);
+    }
+
+    setIsSavingCategory(true);
+    try {
+      const res = await apiService.updateCategory({
+        ...editingCategory,
+        kriteria: criteriaToSave
+      });
+      if (res.success) {
+        setBannerMsg({ type: 'success', text: res.message });
+        setEditingCategory(null);
+        await onRefreshData(true);
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
+      }
+    } catch (err: any) {
+      setBannerMsg({ type: 'error', text: err.message || 'Gagal menyimpan ke Google Sheets' });
+    } finally {
+      setIsSavingCategory(false);
     }
   };
 
@@ -675,10 +715,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
     e.preventDefault();
     if (!newQuestionText.trim() || isSavingCriteria) return;
 
+    const targetCatId = activeCategory?.id_kategori || selectedCategoryId;
+    if (!targetCatId) return;
+
     setIsSavingCriteria(true);
     const currentCriteria = activeCategory?.kriteria || [];
     const updated = [...currentCriteria, newQuestionText.trim()];
-    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(targetCatId, updated);
     setIsSavingCriteria(false);
     if (res.success) {
       setBannerMsg({ type: 'success', text: res.message });
@@ -694,6 +737,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Delete a question from jury criteria
   const handleDeleteQuestion = async (indexToDelete: number) => {
     if (isSavingCriteria) return;
+    const targetCatId = activeCategory?.id_kategori || selectedCategoryId;
+    if (!targetCatId) return;
+
     const currentCriteria = activeCategory?.kriteria || [];
     if (currentCriteria.length <= 1) {
       setBannerMsg({ type: 'error', text: 'Kategori harus memiliki minimal 1 kriteria pertanyaan penilaian.' });
@@ -702,7 +748,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
     setIsSavingCriteria(true);
     const updated = currentCriteria.filter((_, idx) => idx !== indexToDelete);
-    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(targetCatId, updated);
     setIsSavingCriteria(false);
     if (res.success) {
       setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil dihapus dan diperbarui di Google Sheets.' });
@@ -717,11 +763,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Save edited question
   const handleSaveEditQuestion = async (indexToEdit: number) => {
     if (!editingQuestionValue.trim() || isSavingCriteria) return;
+    const targetCatId = activeCategory?.id_kategori || selectedCategoryId;
+    if (!targetCatId) return;
+
     setIsSavingCriteria(true);
     const currentCriteria = activeCategory?.kriteria || [];
     const updated = [...currentCriteria];
     updated[indexToEdit] = editingQuestionValue.trim();
-    const res = await apiService.updateCategoryCriteria(selectedCategoryId, updated);
+    const res = await apiService.updateCategoryCriteria(targetCatId, updated);
     setIsSavingCriteria(false);
     if (res.success) {
       setBannerMsg({ type: 'success', text: 'Kriteria pertanyaan berhasil diperbarui dan disinkronkan ke Google Sheets.' });
@@ -738,9 +787,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Load default criteria if 0 or reset requested
   const handleLoadDefaultCriteria = async () => {
     if (isSavingCriteria) return;
+    const targetCatId = activeCategory?.id_kategori || selectedCategoryId;
+    if (!targetCatId) return;
+
     setIsSavingCriteria(true);
-    const fallback = getFallbackCriteria(selectedCategoryId, activeCategory?.nama_kategori || '');
-    const res = await apiService.updateCategoryCriteria(selectedCategoryId, fallback);
+    const fallback = getFallbackCriteria(targetCatId, activeCategory?.nama_kategori || '');
+    const res = await apiService.updateCategoryCriteria(targetCatId, fallback);
     setIsSavingCriteria(false);
     if (res.success) {
       setBannerMsg({ type: 'success', text: `Standar kriteria penilaian (${fallback.length} pertanyaan) berhasil dimuat & disimpan permanen ke Google Sheets!` });
@@ -2527,6 +2579,28 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </span>
                           </>
                         )}
+
+                        {(c.live_youtube || c.live_tiktok || c.live_instagram) && (
+                          <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                            <LiveRadioIcon className="w-3 h-3 text-rose-600 animate-pulse inline shrink-0" />
+                            Live Aktif: {[
+                              c.live_youtube ? 'YT' : null,
+                              c.live_tiktok ? 'TikTok' : null,
+                              c.live_instagram ? 'IG' : null
+                            ].filter(Boolean).join(' • ')}
+                          </span>
+                        )}
+
+                        {(c.voting_start || c.voting_end) && (
+                          <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded font-medium flex items-center gap-1" title={`Jadwal vote: ${c.voting_start || 'Awal'} s/d ${c.voting_end || 'Akhir'}`}>
+                            <Clock className="w-3 h-3 text-indigo-600 inline shrink-0" />
+                            <span>
+                              {c.voting_start ? new Date(c.voting_start).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Buka Langsung'}
+                              {' s/d '}
+                              {c.voting_end ? new Date(c.voting_end).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Selesai'}
+                            </span>
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -4258,6 +4332,126 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </p>
               </div>
 
+              {/* Link Siaran Langsung (Live Streaming) */}
+              <div className="p-3.5 bg-gradient-to-br from-slate-50 to-slate-100/90 rounded-xl border border-slate-200 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <LiveRadioIcon className="w-3.5 h-3.5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span>Link Siaran Langsung (Live Streaming)</span>
+                      <span className="text-[10px] font-normal text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">Opsional</span>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight">
+                      Tampil di menu <strong>Vote Publik</strong> untuk orang tua/wali menonton langsung. Hanya muncul jika diisi.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  {/* TikTok */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-black text-white flex items-center justify-center p-0.5 shrink-0">
+                        <TikTokIcon className="w-2.5 h-2.5" />
+                      </span>
+                      <span>Link Live TikTok</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.tiktok.com/@akun/live atau https://vt.tiktok.com/..."
+                      value={newCatLiveTiktok}
+                      onChange={(e) => setNewCatLiveTiktok(e.target.value)}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  {/* YouTube */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-red-600 text-white flex items-center justify-center p-0.5 shrink-0">
+                        <YouTubeIcon className="w-3 h-3" />
+                      </span>
+                      <span>Link Live YouTube</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.youtube.com/watch?v=... atau https://youtube.com/live/..."
+                      value={newCatLiveYoutube}
+                      onChange={(e) => setNewCatLiveYoutube(e.target.value)}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  {/* Instagram */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white flex items-center justify-center p-0.5 shrink-0">
+                        <InstagramIcon className="w-3 h-3" />
+                      </span>
+                      <span>Link Live Instagram</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.instagram.com/akun/live"
+                      value={newCatLiveInstagram}
+                      onChange={(e) => setNewCatLiveInstagram(e.target.value)}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Jadwal Waktu Buka & Tutup Vote Publik (Tersimpan di Sheet Categories) */}
+              <div className="p-3.5 bg-gradient-to-br from-indigo-50/60 to-slate-50 rounded-xl border border-indigo-200/70 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <Clock className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span>Jadwal Waktu Vote Publik (Buka &amp; Tutup)</span>
+                      <span className="text-[10px] font-normal text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Sheet Categories</span>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight">
+                      Sebelum waktu dibuka, vote terkunci namun pemilih tetap dapat melihat profil/foto regu untuk menunggu.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
+                      <Clock className="w-3 h-3 text-emerald-600" />
+                      <span>Waktu Dibuka (Mulai Vote)</span>
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={newCatVotingStart}
+                      onChange={(e) => setNewCatVotingStart(e.target.value)}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
+                      <Lock className="w-3 h-3 text-rose-600" />
+                      <span>Waktu Ditutup (Selesai Vote)</span>
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={newCatVotingEnd}
+                      onChange={(e) => setNewCatVotingEnd(e.target.value)}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  * Opsional. Kosongkan jika voting langsung dibuka tanpa pembatasan jam khusus.
+                </p>
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -4537,19 +4731,187 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 />
               </div>
 
+              {editingCategory.assessment_type !== 'public_only' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-800">
+                      Kriteria Pertanyaan Penilaian Juri (Satu baris per kriteria)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fallback = getFallbackCriteria(editingCategory.id_kategori, editingCategory.nama_kategori);
+                        setEditingCategory({
+                          ...editingCategory,
+                          kriteria: fallback
+                        });
+                      }}
+                      className="text-[10px] font-bold text-emerald-800 hover:text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 cursor-pointer"
+                    >
+                      Muat Standar Kriteria ({getFallbackCriteria(editingCategory.id_kategori, editingCategory.nama_kategori).length})
+                    </button>
+                  </div>
+                  <textarea
+                    rows={3}
+                    placeholder="Pertanyaan 1&#10;Pertanyaan 2&#10;Pertanyaan 3"
+                    value={(editingCategory.kriteria || []).join('\n')}
+                    onChange={(e) => {
+                      const lines = e.target.value.split('\n');
+                      setEditingCategory({
+                        ...editingCategory,
+                        kriteria: lines
+                      });
+                    }}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 font-mono text-[11px]"
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Kriteria ini akan menjadi daftar pertanyaan rating 1 - 5 pada formulir penilaian dewan juri.
+                  </p>
+                </div>
+              )}
+
+              {/* Link Siaran Langsung (Live Streaming) */}
+              <div className="p-3.5 bg-gradient-to-br from-slate-50 to-slate-100/90 rounded-xl border border-slate-200 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <LiveRadioIcon className="w-3.5 h-3.5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span>Link Siaran Langsung (Live Streaming)</span>
+                      <span className="text-[10px] font-normal text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">Opsional</span>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight">
+                      Tampil di menu <strong>Vote Publik</strong> untuk orang tua/wali menonton langsung. Hanya muncul jika diisi.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  {/* TikTok */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-black text-white flex items-center justify-center p-0.5 shrink-0">
+                        <TikTokIcon className="w-2.5 h-2.5" />
+                      </span>
+                      <span>Link Live TikTok</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.tiktok.com/@akun/live atau https://vt.tiktok.com/..."
+                      value={editingCategory.live_tiktok || ''}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, live_tiktok: e.target.value })}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  {/* YouTube */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-red-600 text-white flex items-center justify-center p-0.5 shrink-0">
+                        <YouTubeIcon className="w-3 h-3" />
+                      </span>
+                      <span>Link Live YouTube</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.youtube.com/watch?v=... atau https://youtube.com/live/..."
+                      value={editingCategory.live_youtube || ''}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, live_youtube: e.target.value })}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  {/* Instagram */}
+                  <div>
+                    <label className="flex items-center gap-1.5 font-bold text-slate-700 text-[11px] mb-1">
+                      <span className="w-4 h-4 rounded-md bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white flex items-center justify-center p-0.5 shrink-0">
+                        <InstagramIcon className="w-3 h-3" />
+                      </span>
+                      <span>Link Live Instagram</span>
+                    </label>
+                    <input
+                      type="url"
+                      placeholder="https://www.instagram.com/akun/live"
+                      value={editingCategory.live_instagram || ''}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, live_instagram: e.target.value })}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white text-xs placeholder:text-slate-400"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Jadwal Waktu Buka & Tutup Vote Publik (Tersimpan di Sheet Categories) */}
+              <div className="p-3.5 bg-gradient-to-br from-indigo-50/60 to-slate-50 rounded-xl border border-indigo-200/70 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                    <Clock className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span>Jadwal Waktu Vote Publik (Buka &amp; Tutup)</span>
+                      <span className="text-[10px] font-normal text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Sheet Categories</span>
+                    </div>
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight">
+                      Sebelum waktu dibuka, vote publik terkunci otomatis namun pemilih tetap dapat melihat profil/foto regu untuk menunggu.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
+                      <Clock className="w-3 h-3 text-emerald-600" />
+                      <span>Waktu Dibuka (Mulai Vote)</span>
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={editingCategory.voting_start || ''}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, voting_start: e.target.value })}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
+                      <Lock className="w-3 h-3 text-rose-600" />
+                      <span>Waktu Ditutup (Selesai Vote)</span>
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={editingCategory.voting_end || ''}
+                      onChange={(e) => setEditingCategory({ ...editingCategory, voting_end: e.target.value })}
+                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  * Data tersimpan langsung di database Google Sheets (Sheet Categories kolom N &amp; O).
+                </p>
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isSavingCategory}
                   onClick={() => setEditingCategory(null)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl transition-colors shadow-xs cursor-pointer"
+                  disabled={isSavingCategory}
+                  className="px-5 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 disabled:bg-emerald-800/70 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center gap-2"
                 >
-                  Simpan Perubahan
+                  {isSavingCategory ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Menyimpan ke Google Sheets...</span>
+                    </>
+                  ) : (
+                    <span>Simpan Perubahan</span>
+                  )}
                 </button>
               </div>
             </form>

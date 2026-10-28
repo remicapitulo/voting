@@ -39,6 +39,11 @@ export interface CategoryModel {
   tipe_peserta?: 'Group' | 'Individu'; // Khusus kategori ini per group atau perorangan
   assessment_type?: AssessmentType; // 'all' (Multi: Vote & Juri) | 'public_only' (Vote Bebas Saja) | 'jury_only' (Juri Saja)
   assigned_juries?: string[]; // Daftar ID atau username dewan juri yang ditugaskan khusus untuk cabang lomba ini (kosong = semua juri)
+  live_tiktok?: string; // Link siaran langsung TikTok Live
+  live_youtube?: string; // Link siaran langsung YouTube Live
+  live_instagram?: string; // Link siaran langsung Instagram Live
+  voting_start?: string; // Tanggal & jam dibuka vote publik (e.g. "2026-10-27T08:00")
+  voting_end?: string; // Tanggal & jam ditutup vote publik (e.g. "2026-10-27T17:00")
 }
 
 export interface TeamModel {

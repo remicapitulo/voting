@@ -1,1 +1,1486 @@
-export const GAS_SCRIPT_CODE = "/**\n * =========================================================================\n * GOOGLE APPS SCRIPT (GAS) - DATABASE ENGINE E-VOTING & SCORING SYSTEM\n * SMPIT PONDOK DUTA - DATABASE RESMI (CLOUD SPREADSHEET)\n * =========================================================================\n * File ini bertindak sebagai Database Backend Utama yang melayani:\n * - Autentikasi Pengguna & Hak Akses (Admin, Dewan Juri, Pemilih Bebas)\n * - Penyimpanan Sub-Event, Cabang Lomba, Peserta/Regu\n * - Penyimpanan Nilai Real-time Dewan Juri & Hak Suara Voting Publik\n * =========================================================================\n */\n\nvar SHEETS = {\n  USERS: 'Users',\n  EVENTS: 'Events',\n  CATEGORIES: 'Categories',\n  TEAMS: 'Teams',\n  JURY_SCORES: 'Jury_Scores',\n  PUBLIC_VOTES: 'Public_Votes',\n  CONFIG: 'Config'\n};\n\n// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta - Logo dan Laporan)\nvar DRIVE_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';\n\nvar SCHEMAS = [\n  {\n    name: SHEETS.USERS,\n    headers: ['id', 'username', 'password', 'nama', 'role', 'emailOrWa', 'jurySpecialty', 'created_at']\n  },\n  {\n    name: SHEETS.EVENTS,\n    headers: ['id_event', 'kode_event', 'nama_event', 'tahun', 'status_aktif', 'batas_waktu', 'deskripsi']\n  },\n  {\n    name: SHEETS.CATEGORIES,\n    headers: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi', 'assigned_juries']\n  },\n  {\n    name: SHEETS.TEAMS,\n    headers: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota', 'ketua_regu', 'motto', 'tipe_partisipasi']\n  },\n  {\n    name: SHEETS.JURY_SCORES,\n    headers: ['id_score', 'id_jury', 'jury_name', 'id_team', 'id_kategori', 'skor_1_to_5', 'catatan', 'kriteria_scores', 'is_final', 'timestamp']\n  },\n  {\n    name: SHEETS.PUBLIC_VOTES,\n    headers: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp']\n  },\n  {\n    name: SHEETS.CONFIG,\n    headers: ['key', 'value', 'updated_at']\n  }\n];\n\n// DATA AWAL DATABASE (SEEDED DI DATABASE GOOGLE SHEETS)\nvar INITIAL_DATA = {\n  users: [\n    ['user-admin', 'admin', 'admin123', 'Kak Pembina Utama (Admin Duta Evoting)', 'admin', 'admin@pondokduta.sch.id', 'Administrator Utama', '2026-10-01T08:00:00Z'],\n    ['user-juri1', 'juri1', 'juri123', 'Kak Fajar Hidayat, S.Pd', 'juri', '081234567891', 'Dewan Juri Seni & Budaya', '2026-10-02T09:00:00Z'],\n    ['user-juri2', 'juri2', 'juri123', 'Kak Aisyah Wardani, M.Pd', 'juri', '081234567892', 'Dewan Juri Tata Boga & Kerapian', '2026-10-02T09:15:00Z'],\n    ['user-juri3', 'juri3', 'juri123', 'Kak Zulkifli Pratama, S.Kom', 'juri', '081234567893', 'Dewan Juri Ketangkasan & Orasi', '2026-10-02T09:30:00Z'],\n    ['user-voter1', 'voter1', 'voter123', 'Ahmad Fauzi (Alumni)', 'voter', '085712345678', '', '2026-10-10T10:00:00Z'],\n    ['user-voter2', 'voter2', 'voter123', 'Bunda Lilis (Orang Tua Murid)', 'voter', '081398765432', '', '2026-10-10T10:30:00Z']\n  ],\n  events: [\n    [\n      'duta-camp-2026',\n      'Duta Camp',\n      'Duta Camp - Perkemahan Pramuka Penggalang',\n      '2026',\n      true,\n      '2026-10-31T23:59:00',\n      'Perkemahan Akbar Penggalang SMPIT Pondok Duta - Membentuk Generasi Mandiri, Tangguh, & Berkarakter'\n    ],\n    [\n      'phbi-2026',\n      'PHBI',\n      'PHBI - Peringatan Hari Besar Islam 1448 H',\n      '2026',\n      true,\n      '2026-11-15T21:00:00',\n      'Peringatan Hari Besar Islam SMPIT Pondok Duta - Mengukir Prestasi Islami, Meneladani Akhlak Nabi'\n    ],\n    [\n      'phbn-2026',\n      'PHBN',\n      'PHBN - Peringatan Hari Besar Nasional & Kemerdekaan',\n      '2026',\n      true,\n      '2026-12-01T20:00:00',\n      'Gebyar Semarak Kemerdekaan & Hari Pahlawan SMPIT Pondok Duta - Jiwa Nasionalis, Berprestasi untuk Negeri'\n    ]\n  ],\n  categories: [\n    [\n      'cat-campfire',\n      'duta-camp-2026',\n      'Campfire Symphony',\n      'Pentas Seni Malam Api Unggun',\n      'all',\n      'Group',\n      1,\n      JSON.stringify([\n        'Kreativitas & Orisinalitas Konsep',\n        'Kekompakan & Harmonisasi Regu',\n        'Penjiwaan & Pembawaan Pesan Moral/Islami',\n        'Kerapian Seragam & Tata Panggung'\n      ]),\n      'Pentas Seni Malam Api Unggun (Acoustic, Teatrikal, Puisi Rimba & Paduan Suara)'\n    ],\n    [\n      'cat-chef',\n      'duta-camp-2026',\n      'Master Camp Chef',\n      'Lomba Memasak Rimba',\n      'all',\n      'Group',\n      1,\n      JSON.stringify([\n        'Cita Rasa & Kelezatan Masakan Rimba',\n        'Penyajian & Kebersihan Area Memasak',\n        'Efisiensi Bahan & Kandungan Gizi',\n        'Kerjasama Tim & Ketepatan Waktu (Manajemen Waktu)'\n      ]),\n      'Lomba Memasak Rimba (Menu Bergizi Penggalang Menggunakan Peralatan Masak Lapangan)'\n    ],\n    [\n      'cat-rover',\n      'duta-camp-2026',\n      'Duta Rover Challenge',\n      'Ketangkasan & Penjelajahan Per Pos',\n      'all',\n      'Group',\n      1,\n      JSON.stringify([\n        'Ketepatan & Kecepatan Sandi / Morse / Semaphore',\n        'Kekuatan & Kerapian Simpul / Ikatan Pionering',\n        'Kesiapsiagaan Pos P3K & Navigasi Kompas',\n        'Disiplin, Yel-Yel & Semangat Kebersamaan Regu'\n      ]),\n      'Ketangkasan & Penjelajahan Rimba (Pionering, Semaphore, Morse, Menaksir & P3K)'\n    ],\n    [\n      'cat-phbi-pildacil',\n      'phbi-2026',\n      \"Musabaqah Da'i Muda (Pidato Islami)\",\n      'Pidato & Dakwah Islami',\n      'all',\n      'Individu',\n      1,\n      JSON.stringify([\n        \"Kesesuaian Tema & Kedalaman Dalil Al-Qur'an/Hadits\",\n        'Retorika, Artikulasi & Intonasi Vokal',\n        'Adab, Sikap & Kerapian Busana Muslim',\n        'Ketepatan Alokasi Waktu (Max 7 Menit)'\n      ]),\n      'Lomba Syiar Dakwah Islam dan Retorika Ceramah Generasi Muda Qurani'\n    ],\n    [\n      'cat-phbi-tahfidz',\n      'phbi-2026',\n      \"Musabaqah Hifdzil Qur'an (MHQ)\",\n      \"Hafalan Al-Qur'an\",\n      'all',\n      'Individu',\n      1,\n      JSON.stringify([\n        'Kelancaran & Ketepatan Hafalan (Tahfidz)',\n        'Kaidah Tajwid (Makharijul Huruf & Shifatul Huruf)',\n        'Fashahah & Keindahan Lagu/Tartil',\n        \"Adab Membaca Kitab Suci Al-Qur'an\"\n      ]),\n      \"Uji Hafalan dan Tartil Al-Qur'an Juz 30 dan Juz 29\"\n    ],\n    [\n      'cat-phbi-hadroh',\n      'phbi-2026',\n      'Festival Hadroh & Nasyid Sholawat',\n      'Seni Musik Islami',\n      'all',\n      'Group',\n      1,\n      JSON.stringify([\n        'Kekompakan Ketukan & Ritme Tabuhan Rebana',\n        'Harmonisasi Vokal Utama & Backing Vokal',\n        'Kesesuaian Syair Sholawat & Makhraj Bahasa Arab',\n        'Kerapian Seragam & Koreografi Panggung'\n      ]),\n      'Lomba Paduan Rebana Klasik dan Shalawat Kontemporer Penggetar Jiwa'\n    ],\n    [\n      'cat-phbn-orasi',\n      'phbn-2026',\n      'Lomba Orasi Kebangsaan Pemuda',\n      'Orasi Kebangsaan',\n      'all',\n      'Individu',\n      1,\n      JSON.stringify([\n        'Penjiwaan Semangat Nasionalisme & Heroisme',\n        'Kekuatan Argumentasi & Solusi Generasi Emas',\n        'Gestur, Penguasaan Panggung & Kontak Mata',\n        'Kerapian Pakaian Adat / Pahlawan Nasional'\n      ]),\n      'Pidato Kepahlawanan & Mengobarkan Semangat Persatuan Bangsa'\n    ],\n    [\n      'cat-phbn-padus',\n      'phbn-2026',\n      'Paduan Suara Lagu Wajib Nasional',\n      'Paduan Suara',\n      'all',\n      'Group',\n      1,\n      JSON.stringify([\n        'Ketepatan Nada (Pitch & Intonation)',\n        'Kekompakan Aransemen & Dinamika Vokal',\n        'Artikulasi & Pengucapan Lirik Nasional',\n        'Kerapian Formasi & Penampilan Kontingen'\n      ]),\n      'Lomba Paduan Suara Harmonisasi Lagu Perjuangan Kemerdekaan Indonesia'\n    ]\n  ],\n  teams: [\n    ['team-rajawali', 'duta-camp-2026', 'Regu Rajawali', 'Kelas 8A / Pasukan Penggalang Khusus', 'Putra', '', '[\"Muhammad Rizky Pratama\"]', 'Muhammad Rizky Pratama', 'Tangkas, Berani, Berakhlak Mulia', 'Group'],\n    ['team-elang', 'duta-camp-2026', 'Regu Elang', 'Kelas 8B / Pasukan Penggalang Inti', 'Putra', '', '[\"Farhan Nur Hidayat\"]', 'Farhan Nur Hidayat', 'Terbang Tinggi Menggapai Prestasi', 'Group'],\n    ['team-garuda', 'duta-camp-2026', 'Regu Garuda', 'Kelas 7A / Pasukan Penggalang Ramu', 'Putra', '', '[\"Abdullah Azzam\"]', 'Abdullah Azzam', 'Gagah Perkasa Pantang Menyerah', 'Group'],\n    ['team-serigala', 'duta-camp-2026', 'Regu Serigala', 'Kelas 7B / Pasukan Penggalang Rakit', 'Putra', '', '[\"Haikal Danendra\"]', 'Haikal Danendra', 'Setia Kawan, Disiplin dan Berani', 'Group'],\n    ['team-melati', 'duta-camp-2026', 'Regu Melati', 'Kelas 8C / Pasukan Penggalang Putri Utama', 'Putri', '', '[\"Nayla Zahra Salsabila\"]', 'Nayla Zahra Salsabila', 'Harum Namamu, Mulia Akhlakmu', 'Group'],\n    ['team-mawar', 'duta-camp-2026', 'Regu Mawar', 'Kelas 8D / Pasukan Penggalang Putri Mandiri', 'Putri', '', '[\"Syifa Aulia Rahman\"]', 'Syifa Aulia Rahman', 'Tegar Berduri, Indah Berbudi', 'Group'],\n    ['team-sakura', 'duta-camp-2026', 'Regu Sakura', 'Kelas 7C / Pasukan Penggalang Harapan', 'Putri', '', '[\"Amina Khadijah\"]', 'Amina Khadijah', 'Mekar Ceria Penuh Prestasi', 'Group'],\n    ['team-anggrek', 'duta-camp-2026', 'Regu Anggrek', 'Kelas 7D / Pasukan Penggalang Cerdas', 'Putri', '', '[\"Fathimah Azzahra\"]', 'Fathimah Azzahra', 'Anggun Berkarakter Qurani', 'Group'],\n    ['phbi-raihan', 'phbi-2026', 'Muhammad Raihan Pratama', \"Kelas 8B / Kontingen Da'i Mandiri\", 'Putra', '', '[]', 'Ustadz Danang', 'Dakwah Cerdas Berakhlak Mulia', 'Individu'],\n    ['phbi-zahra', 'phbi-2026', 'Sarah Azzahra Al-Hafizhah', 'Kelas 7C / Kafilah Tahfidz Khusus', 'Putri', '', '[]', 'Ustadzah Halimah', 'Mendekap Al-Quran di Lubuk Hati', 'Individu'],\n    ['phbi-hadroh', 'phbi-2026', 'Grup Hadroh Shautud Duta', 'Kelas 9A / Sanggar Sholawat Utama', 'Putra', '', '[]', 'Ahmad Fauzan', 'Gema Sholawat Menyejukkan Jiwa', 'Group'],\n    ['phbi-nasyid', 'phbi-2026', 'Grup Nasyid Nada Insani', 'Kelas 8C / Sanggar Nada Muslimah', 'Putri', '', '[]', 'Nabila Qatrunnada', 'Harmoni Dakwah Nada Suci', 'Group'],\n    ['phbn-dimas', 'phbn-2026', 'Dimas Arya Putra', 'Kelas 9C / Duta Orator Sekolah', 'Putra', '', '[]', 'Kak Hendra', 'Kobarkan Jiwa Patriotisme Bangsa', 'Individu'],\n    ['phbn-aisyah', 'phbn-2026', 'Aisyah Humaira', 'Kelas 8C / Orator Penggerak', 'Putri', '', '[]', 'Bunda Ratna', 'Generasi Emas Harapan Indonesia', 'Individu'],\n    ['phbn-padus', 'phbn-2026', 'Tim Padus Gema Persada', 'Gabungan Kelas 8 & 9 / Gita Duta Swara', 'Putri', '', '[]', 'Ibu Cindy', 'Satu Nusa Satu Bangsa Berkarya', 'Group']\n  ],\n  jury_scores: [\n    [\n      'score-1',\n      'user-juri1',\n      'Kak Fajar Hidayat, S.Pd',\n      'team-rajawali',\n      'cat-campfire',\n      4.6,\n      'Harmonisasi vokal acapella dan pesan perjuangan dakwah sangat menyentuh hati audiens.',\n      JSON.stringify({\n        'Kreativitas & Orisinalitas Konsep': 4.5,\n        'Kekompakan & Harmonisasi Regu': 4.7,\n        'Penjiwaan & Pembawaan Pesan Moral/Islami': 4.8,\n        'Kerapian Seragam & Tata Panggung': 4.4\n      }),\n      true,\n      '2026-10-23T14:30:00Z'\n    ],\n    [\n      'score-2',\n      'user-juri2',\n      'Kak Aisyah Wardani, M.Pd',\n      'team-rajawali',\n      'cat-campfire',\n      4.5,\n      'Kerapian seragam khas pramuka dan ketepatan tempo sangat baik.',\n      JSON.stringify({\n        'Kreativitas & Orisinalitas Konsep': 4.3,\n        'Kekompakan & Harmonisasi Regu': 4.5,\n        'Penjiwaan & Pembawaan Pesan Moral/Islami': 4.6,\n        'Kerapian Seragam & Tata Panggung': 4.6\n      }),\n      true,\n      '2026-10-23T14:45:00Z'\n    ],\n    [\n      'score-3',\n      'user-juri1',\n      'Kak Fajar Hidayat, S.Pd',\n      'team-melati',\n      'cat-campfire',\n      4.8,\n      'Koreografi perkusi bambu dan puisi rimba sangat artistik dan rapi.',\n      JSON.stringify({\n        'Kreativitas & Orisinalitas Konsep': 4.8,\n        'Kekompakan & Harmonisasi Regu': 4.9,\n        'Penjiwaan & Pembawaan Pesan Moral/Islami': 4.7,\n        'Kerapian Seragam & Tata Panggung': 4.8\n      }),\n      true,\n      '2026-10-23T15:00:00Z'\n    ]\n  ],\n  public_votes: [\n    ['vote-1', 'user-voter1', 'Ahmad Fauzi', 'team-rajawali', 'cat-campfire', '2026-10-23T12:00:00Z'],\n    ['vote-2', 'user-voter2', 'Bunda Lilis', 'team-melati', 'cat-campfire', '2026-10-23T12:05:00Z']\n  ]\n};\n\n/**\n * Menyiapkan Tabel Database & Memasukkan Data Awal ke Google Sheets\n */\nfunction setupDatabaseSheets() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n\n  SCHEMAS.forEach(function(schema) {\n    var sheet = ss.getSheetByName(schema.name);\n    if (!sheet) {\n      sheet = ss.insertSheet(schema.name);\n    }\n\n    if (sheet.getLastRow() === 0) {\n      sheet.appendRow(schema.headers);\n      sheet.getRange(1, 1, 1, schema.headers.length)\n        .setFontWeight('bold')\n        .setBackground('#064e3b')\n        .setFontColor('#ffffff');\n      sheet.setFrozenRows(1);\n    } else {\n      var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];\n      for (var h = 0; h < schema.headers.length; h++) {\n        var headerName = schema.headers[h];\n        if (existingHeaders.indexOf(headerName) === -1) {\n          var nextCol = sheet.getLastColumn() + 1;\n          sheet.getRange(1, nextCol).setValue(headerName)\n            .setFontWeight('bold')\n            .setBackground('#064e3b')\n            .setFontColor('#ffffff');\n        }\n      }\n    }\n  });\n\n  // Seed Data Awal ke Google Sheets jika sheet masih kosong (hanya header)\n  var usersSheet = ss.getSheetByName(SHEETS.USERS);\n  if (usersSheet.getLastRow() <= 1) {\n    INITIAL_DATA.users.forEach(function(row) { usersSheet.appendRow(row); });\n  }\n\n  var eventsSheet = ss.getSheetByName(SHEETS.EVENTS);\n  if (eventsSheet.getLastRow() <= 1) {\n    INITIAL_DATA.events.forEach(function(row) { eventsSheet.appendRow(row); });\n  }\n\n  var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);\n  if (catSheet.getLastRow() <= 1) {\n    INITIAL_DATA.categories.forEach(function(row) { catSheet.appendRow(row); });\n  }\n\n  var teamSheet = ss.getSheetByName(SHEETS.TEAMS);\n  if (teamSheet.getLastRow() <= 1) {\n    INITIAL_DATA.teams.forEach(function(row) { teamSheet.appendRow(row); });\n  }\n\n  var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);\n  if (scoreSheet.getLastRow() <= 1) {\n    INITIAL_DATA.jury_scores.forEach(function(row) { scoreSheet.appendRow(row); });\n  }\n\n  var voteSheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);\n  if (voteSheet.getLastRow() <= 1) {\n    INITIAL_DATA.public_votes.forEach(function(row) { voteSheet.appendRow(row); });\n  }\n\n  return { status: 'success', message: 'Database Google Sheets berhasil disiapkan dan diisi dengan Data Awal!' };\n}\n\nfunction doGet(e) {\n  var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : 'ping';\n  var response = {};\n  try {\n    if (action === 'ping') {\n      response = { status: 'success', message: 'Database Google Sheets Aktif & Terhubung', timestamp: new Date().toISOString() };\n    } else if (action === 'getAllData') {\n      response = { status: 'success', data: getAllDatabaseData() };\n    } else if (action === 'setup') {\n      response = setupDatabaseSheets();\n    } else if (action === 'getDriveLogos' || action === 'syncDriveLogos') {\n      response = { status: 'success', logos: syncAndGetDriveLogos() };\n    } else {\n      response = { status: 'error', message: 'Action GET tidak dikenali: ' + action };\n    }\n  } catch (err) {\n    response = { status: 'error', message: err.toString() };\n  }\n  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);\n}\n\nfunction doPost(e) {\n  var response = {};\n  try {\n    var body = {};\n    if (e.postData && e.postData.contents) {\n      body = JSON.parse(e.postData.contents);\n    } else if (e.parameter) {\n      body = e.parameter;\n    }\n    var action = body.action || '';\n\n    switch (action) {\n      case 'ping':\n        response = { status: 'success', message: 'Koneksi database berhasil.' };\n        break;\n      case 'setupSheets':\n        response = setupDatabaseSheets();\n        break;\n      case 'getAllData':\n        response = { status: 'success', data: getAllDatabaseData() };\n        break;\n      case 'getDriveLogos':\n      case 'syncDriveLogos':\n        response = { status: 'success', logos: syncAndGetDriveLogos(body.folderId) };\n        break;\n      case 'login':\n        response = handleLogin(body.username, body.password);\n        break;\n      case 'register':\n        response = handleRegister(body);\n        break;\n      case 'submitJuryScore':\n        response = handleSubmitJuryScore(body);\n        break;\n      case 'submitPublicVote':\n        response = handleSubmitPublicVote(body);\n        break;\n      case 'removePublicVote':\n      case 'cancelPublicVote':\n        response = handleRemovePublicVote(body);\n        break;\n      case 'updateCategoryCriteria':\n        response = handleUpdateCategoryCriteria(body);\n        break;\n      case 'uploadLogo':\n        response = handleUploadLogoToDrive(body);\n        break;\n      case 'saveConfig':\n        response = handleSaveConfig(body);\n        break;\n      case 'getConfig':\n        response = handleGetConfig(body.key);\n        break;\n      case 'manageCategory':\n      case 'purgeCategory':\n        response = handleManageCategory(body);\n        break;\n      case 'manageTeam':\n        response = handleManageTeam(body);\n        break;\n      case 'manageJury':\n        response = handleManageJury(body);\n        break;\n      case 'manageEvent':\n        response = handleManageEvent(body);\n        break;\n      case 'toggleEventStatus':\n        response = handleToggleEventStatus(body);\n        break;\n      case 'updateEventDeadline':\n        response = handleUpdateEventDeadline(body);\n        break;\n      default:\n        response = { status: 'error', message: 'Action POST tidak valid: ' + action };\n    }\n  } catch (err) {\n    response = { status: 'error', message: err.toString() };\n  }\n  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);\n}\n\nfunction getAllDatabaseData() {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  fixUserRowsAlignment();\n  var teamSheet = ss.getSheetByName(SHEETS.TEAMS);\n  if (teamSheet) {\n    ensureHeaderExists(teamSheet, 'ketua_regu');\n    ensureHeaderExists(teamSheet, 'motto');\n    ensureHeaderExists(teamSheet, 'tipe_partisipasi');\n  }\n\n  var configMap = getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'));\n\n  // Otomatis sinkronkan dan baca seluruh berkas gambar langsung dari Google Drive Folder\n  try {\n    var driveFiles = getLogosFromDriveFolder(DRIVE_FOLDER_ID);\n    if (driveFiles && driveFiles.length > 0) {\n      var existingUploaded = configMap.uploaded_logos || [];\n      if (!Array.isArray(existingUploaded)) existingUploaded = [];\n      var mergedMap = {};\n      for (var d = 0; d < driveFiles.length; d++) {\n        var df = driveFiles[d];\n        mergedMap[df.driveFileId] = df;\n      }\n      for (var ex = 0; ex < existingUploaded.length; ex++) {\n        var itm = existingUploaded[ex];\n        if (itm && (itm.driveFileId || itm.id)) {\n          var k = itm.driveFileId || itm.id;\n          if (mergedMap[k]) {\n            mergedMap[k] = Object.assign({}, mergedMap[k], itm);\n          } else if (itm.url) {\n            mergedMap[k] = itm;\n          }\n        }\n      }\n      var mergedList = [];\n      for (var mk in mergedMap) {\n        mergedList.push(mergedMap[mk]);\n      }\n      configMap.uploaded_logos = mergedList;\n      saveUploadedLogoListToConfig(mergedList);\n    }\n  } catch (driveErr) {\n    Logger.log('Drive folder scanning skipped in getAllDatabaseData: ' + driveErr);\n  }\n\n  return {\n    users: getSheetDataAsObjects(ss.getSheetByName(SHEETS.USERS)),\n    events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),\n    categories: getSheetDataAsObjects(ss.getSheetByName(SHEETS.CATEGORIES)),\n    teams: getSheetDataAsObjects(teamSheet),\n    jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),\n    public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),\n    config: configMap\n  };\n}\n\n/**\n * Menyimpan baris baru dengan mencocokkan nama properti ke nama header kolom secara dinamis\n */\nfunction appendRowByHeaders(sheet, dataObj) {\n  var lastCol = Math.max(sheet.getLastColumn(), 1);\n  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];\n  var row = [];\n  for (var i = 0; i < headers.length; i++) {\n    var key = String(headers[i]).trim();\n    var val = dataObj[key];\n    if (val === undefined || val === null) {\n      row.push('');\n    } else if (typeof val === 'object') {\n      row.push(JSON.stringify(val));\n    } else {\n      row.push(val);\n    }\n  }\n  sheet.appendRow(row);\n  return row;\n}\n\n/**\n * Memperbarui nilai sel pada baris tertentu berdasarkan kecocokan nama header\n */\nfunction updateRowByHeaders(sheet, rowIndex, dataObj) {\n  var lastCol = Math.max(sheet.getLastColumn(), 1);\n  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];\n  for (var i = 0; i < headers.length; i++) {\n    var key = String(headers[i]).trim();\n    if (dataObj[key] !== undefined) {\n      var val = dataObj[key];\n      if (typeof val === 'object' && val !== null) {\n        val = JSON.stringify(val);\n      }\n      sheet.getRange(rowIndex, i + 1).setValue(val);\n    }\n  }\n}\n\nfunction ensureHeaderExists(sheet, headerName) {\n  try {\n    var lastCol = Math.max(sheet.getLastColumn(), 1);\n    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];\n    for (var i = 0; i < headers.length; i++) {\n      if (String(headers[i]).trim() === headerName) return;\n    }\n    sheet.getRange(1, lastCol + 1).setValue(headerName);\n  } catch (e) {\n    // ignore\n  }\n}\n\n/**\n * Perbaikan Otomatis Baris yang Tergeser di Sheet Users (misal nomor wa masuk ke created_at)\n */\nfunction fixUserRowsAlignment() {\n  try {\n    var ss = SpreadsheetApp.getActiveSpreadsheet();\n    var sheet = ss.getSheetByName(SHEETS.USERS);\n    if (!sheet) return;\n    var rows = sheet.getDataRange().getValues();\n    if (rows.length <= 1) return;\n    var headers = rows[0];\n    var emailCol = headers.indexOf('emailOrWa');\n    var createdCol = headers.indexOf('created_at');\n    var specialtyCol = headers.indexOf('jurySpecialty');\n\n    for (var r = 1; r < rows.length; r++) {\n      var createdAtVal = String(rows[r][createdCol] || '').trim();\n      // Jika kolom created_at terisi nomor telepon/wa (angka murni tanpa huruf 'T')\n      if (createdAtVal && !createdAtVal.includes('T') && /^[0-9+]+$/.test(createdAtVal)) {\n        var realPhone = createdAtVal;\n        var realTimestamp = (specialtyCol >= 0 && String(rows[r][specialtyCol]).includes('T'))\n          ? String(rows[r][specialtyCol])\n          : new Date().toISOString();\n        if (emailCol >= 0) {\n          sheet.getRange(r + 1, emailCol + 1).setValue(realPhone);\n        }\n        sheet.getRange(r + 1, createdCol + 1).setValue(realTimestamp);\n        if (specialtyCol >= 0) {\n          sheet.getRange(r + 1, specialtyCol + 1).setValue('');\n        }\n      }\n    }\n  } catch (e) {\n    Logger.log('Auto fix user alignment skipped: ' + e);\n  }\n}\n\nfunction handleLogin(username, password) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.USERS);\n  if (!sheet) return { status: 'error', message: 'Sheet Users belum tersedia' };\n  var users = getSheetDataAsObjects(sheet);\n  var cleanUser = String(username || '').trim().toLowerCase();\n  var cleanPass = String(password || '').trim();\n\n  for (var i = 0; i < users.length; i++) {\n    var u = users[i];\n    if (String(u.username).trim().toLowerCase() === cleanUser) {\n      if (String(u.password).trim() === cleanPass) {\n        return {\n          status: 'success',\n          user: {\n            id: u.id,\n            username: u.username,\n            nama: u.nama,\n            role: u.role,\n            created_at: u.created_at\n          }\n        };\n      }\n      return { status: 'error', message: 'Password salah' };\n    }\n  }\n  return { status: 'error', message: 'Pengguna tidak ditemukan' };\n}\n\nfunction handleRegister(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.USERS);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.USERS);\n  }\n\n  var username = String(data.username || '').trim().toLowerCase();\n  var nama = String(data.nama || '').trim();\n  var password = String(data.password || '');\n  var emailOrWa = String(data.emailOrWa || '').trim();\n  if (!username || !password || !nama) return { status: 'error', message: 'Data registrasi tidak lengkap' };\n\n  var users = getSheetDataAsObjects(sheet);\n  for (var i = 0; i < users.length; i++) {\n    if (String(users[i].username).trim().toLowerCase() === username) {\n      return { status: 'error', message: 'Username sudah digunakan' };\n    }\n  }\n  var newId = 'voter-' + new Date().getTime();\n  var ts = new Date().toISOString();\n\n  appendRowByHeaders(sheet, {\n    id: newId,\n    username: username,\n    password: password,\n    nama: nama,\n    role: 'voter',\n    emailOrWa: emailOrWa,\n    jurySpecialty: '',\n    created_at: ts\n  });\n\n  return { status: 'success', user: { id: newId, username: username, nama: nama, role: 'voter' } };\n}\n\nfunction handleSubmitJuryScore(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.JURY_SCORES);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.JURY_SCORES);\n  }\n\n  var idJury = String(data.id_jury || '');\n  var juryName = String(data.jury_name || '');\n  var idTeam = String(data.id_team || '');\n  var idKategori = String(data.id_kategori || '');\n  var skor = parseFloat(data.skor_1_to_5 || 0);\n  var catatan = String(data.catatan || '');\n  var kriteriaScores = typeof data.kriteria_scores === 'object' ? JSON.stringify(data.kriteria_scores) : String(data.kriteria_scores || '{}');\n  var isFinal = data.is_final ? true : false;\n  var ts = new Date().toISOString();\n\n  var scoreObj = {\n    id_jury: idJury,\n    jury_name: juryName,\n    id_team: idTeam,\n    id_kategori: idKategori,\n    skor_1_to_5: skor,\n    catatan: catatan,\n    kriteria_scores: kriteriaScores,\n    is_final: isFinal,\n    timestamp: ts\n  };\n\n  var scores = getSheetDataAsObjects(sheet);\n  for (var r = 0; r < scores.length; r++) {\n    if (String(scores[r].id_jury) === idJury && String(scores[r].id_team) === idTeam && String(scores[r].id_kategori) === idKategori) {\n      updateRowByHeaders(sheet, r + 2, scoreObj);\n      return { status: 'success', message: 'Nilai juri berhasil diperbarui' };\n    }\n  }\n\n  scoreObj.id_score = data.id_score || ('score-' + new Date().getTime());\n  appendRowByHeaders(sheet, scoreObj);\n  return { status: 'success', message: 'Nilai juri berhasil disimpan' };\n}\n\nfunction handleSubmitPublicVote(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);\n  }\n\n  var idVote = String(data.id_vote || ('vote-' + new Date().getTime())).trim();\n  var idVoter = String(data.id_voter || '').trim();\n  var voterName = String(data.voter_name || '').trim();\n  var idTeam = String(data.id_team || '').trim();\n  var idKategori = String(data.id_kategori || '').trim();\n  var ts = String(data.timestamp || new Date().toISOString());\n\n  if (!idVoter || !idTeam || !idKategori) {\n    return { status: 'error', message: 'Data vote tidak lengkap (voter, regu, atau kategori kosong).' };\n  }\n\n  // Jika nama voter belum disertakan, cari nama asli di sheet Users\n  if (!voterName && idVoter) {\n    try {\n      var userSheet = ss.getSheetByName(SHEETS.USERS);\n      if (userSheet) {\n        var uRows = userSheet.getDataRange().getValues();\n        for (var u = 1; u < uRows.length; u++) {\n          if (String(uRows[u][0]).trim() === idVoter || String(uRows[u][1]).trim().toLowerCase() === idVoter.toLowerCase()) {\n            voterName = String(uRows[u][3] || uRows[u][1] || '').trim();\n            break;\n          }\n        }\n      }\n    } catch (uErr) {\n      Logger.log('Lookup user name error: ' + uErr);\n    }\n  }\n\n  var votes = getSheetDataAsObjects(sheet);\n  var userVotesInCat = 0;\n  for (var r = 0; r < votes.length; r++) {\n    var vVoter = String(votes[r].id_voter || '').trim();\n    var vCat = String(votes[r].id_kategori || '').trim();\n    var vTeam = String(votes[r].id_team || '').trim();\n\n    if (vVoter === idVoter && vCat === idKategori) {\n      if (vTeam === idTeam) {\n        return { status: 'error', message: 'Anda sudah memberikan suara untuk regu ini!' };\n      }\n      userVotesInCat++;\n    }\n  }\n\n  // Tentukan batas kuota suara untuk kategori ini (prioritas: data request -> sheet Categories -> default 1)\n  var maxQuota = data.votes_required ? parseInt(data.votes_required, 10) : 0;\n  if (!maxQuota || maxQuota < 1) {\n    try {\n      var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);\n      if (catSheet) {\n        var cRows = catSheet.getDataRange().getValues();\n        for (var c = 1; c < cRows.length; c++) {\n          if (String(cRows[c][0]).trim().toLowerCase() === idKategori.toLowerCase()) {\n            maxQuota = parseInt(cRows[c][6] || 1, 10);\n            break;\n          }\n        }\n      }\n    } catch (cErr) {\n      Logger.log('Lookup category quota error: ' + cErr);\n    }\n  }\n  if (!maxQuota || maxQuota < 1) maxQuota = 1;\n\n  if (userVotesInCat >= maxQuota) {\n    return { status: 'error', message: 'Hak suara Anda (' + maxQuota + ' suara) untuk kategori ini sudah terpenuhi.' };\n  }\n\n  appendRowByHeaders(sheet, {\n    id_vote: idVote,\n    id_voter: idVoter,\n    voter_name: voterName,\n    id_team: idTeam,\n    id_kategori: idKategori,\n    timestamp: ts\n  });\n\n  return { status: 'success', message: 'Vote berhasil disimpan ke database Google Sheets!', id_vote: idVote };\n}\n\nfunction handleRemovePublicVote(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);\n  if (!sheet) return { status: 'error', message: 'Sheet Public_Votes belum tersedia' };\n\n  var idVote = String(data.id_vote || '').trim();\n  var idVoter = String(data.id_voter || '').trim();\n  var idTeam = String(data.id_team || '').trim();\n  var idKategori = String(data.id_kategori || '').trim();\n\n  var rows = sheet.getDataRange().getValues();\n  for (var r = rows.length - 1; r >= 1; r--) {\n    var rowVoteId = String(rows[r][0] || '').trim();\n    var rowVoter = String(rows[r][1] || '').trim();\n    var rowTeam = String(rows[r][3] || '').trim();\n    var rowCat = String(rows[r][4] || '').trim();\n\n    var matchVoteId = idVote && (rowVoteId === idVote);\n    var matchComposite = idVoter && idTeam && idKategori && (rowVoter === idVoter && rowTeam === idTeam && rowCat === idKategori);\n\n    if (matchVoteId || matchComposite) {\n      sheet.deleteRow(r + 1);\n      return { status: 'success', message: 'Suara berhasil dibatalkan dari database Google Sheets.' };\n    }\n  }\n  return { status: 'error', message: 'Data suara tidak ditemukan di database Google Sheets.' };\n}\n\nfunction handleManageCategory(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.CATEGORIES);\n  }\n\n  var op = data.operation || 'create';\n  var idKategori = String(data.id_kategori || ('cat-' + new Date().getTime())).trim();\n  var namaKategori = String(data.nama_kategori || '').trim();\n  var idEvent = String(data.id_event || '').trim();\n  var rows = sheet.getDataRange().getValues();\n\n  if (op === 'delete' || op === 'purge') {\n    var targetId = idKategori.toLowerCase();\n    var targetName = namaKategori.toLowerCase();\n    var targetEvent = idEvent.toLowerCase();\n    var deletedCount = 0;\n\n    // Loop dari baris paling bawah ke atas agar indeks baris sheet tidak tergeser saat deleteRow\n    for (var r = rows.length - 1; r >= 1; r--) {\n      var rowId = String(rows[r][0] || '').trim().toLowerCase();\n      var rowEvent = String(rows[r][1] || '').trim().toLowerCase();\n      var rowName = String(rows[r][2] || '').trim().toLowerCase();\n\n      var matchName = targetName && (rowName === targetName);\n      var matchId = targetId && (rowId === targetId);\n\n      // Cocok jika:\n      // 1. Nama kategori sama persis (misal 'Master Camp Chef')\n      // 2. Atau jika targetId sama persis DAN jika targetName ada maka nama juga cocok, atau targetName kosong\n      if (matchName || (matchId && (!targetName || rowName === targetName))) {\n        sheet.deleteRow(r + 1);\n        deletedCount++;\n      }\n    }\n\n    if (deletedCount > 0) {\n      // Bersihkan juga nilai skor dan vote publik terkait kategori ini jika ada\n      try {\n        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);\n        if (scoreSheet) {\n          var sRows = scoreSheet.getDataRange().getValues();\n          for (var s = sRows.length - 1; s >= 1; s--) {\n            var sCatId = String(sRows[s][4] || '').trim().toLowerCase();\n            if (sCatId === targetId) {\n              scoreSheet.deleteRow(s + 1);\n            }\n          }\n        }\n        var voteSheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);\n        if (voteSheet) {\n          var vRows = voteSheet.getDataRange().getValues();\n          for (var v = vRows.length - 1; v >= 1; v--) {\n            var vCatId = String(vRows[v][4] || '').trim().toLowerCase();\n            if (vCatId === targetId) {\n              voteSheet.deleteRow(v + 1);\n            }\n          }\n        }\n      } catch (cleanErr) {\n        Logger.log('Score/vote cleanup warning: ' + cleanErr);\n      }\n\n      return { status: 'success', message: 'Cabang lomba (' + (namaKategori || idKategori) + ') sebanyak ' + deletedCount + ' baris berhasil dihapus permanen dari Google Sheets.' };\n    }\n    return { status: 'error', message: 'Cabang lomba tidak ditemukan di sheet Categories Google Sheets.' };\n  }\n\n  ensureHeaderExists(sheet, 'assigned_juries');\n\n  var kriteriaStr = Array.isArray(data.kriteria) ? JSON.stringify(data.kriteria) : String(data.kriteria || '[]');\n  var assignedJuriesStr = Array.isArray(data.assigned_juries)\n    ? JSON.stringify(data.assigned_juries)\n    : String(data.assigned_juries || '[]');\n\n  var catObj = {\n    id_kategori: idKategori,\n    id_event: data.id_event || 'duta-camp-2026',\n    nama_kategori: data.nama_kategori,\n    tipe: data.tipe || 'Lomba',\n    assessment_type: data.assessment_type || 'all',\n    tipe_peserta: data.tipe_peserta || 'Group',\n    votes_required: parseInt(data.votes_required || 1, 10),\n    kriteria: kriteriaStr,\n    deskripsi: data.deskripsi || '',\n    assigned_juries: assignedJuriesStr\n  };\n\n  if (op === 'update') {\n    // 1. Cari berdasarkan ID\n    for (var i = 1; i < rows.length; i++) {\n      if (String(rows[i][0]).trim().toLowerCase() === idKategori.toLowerCase()) {\n        updateRowByHeaders(sheet, i + 1, catObj);\n        return { status: 'success', message: 'Cabang lomba berhasil diperbarui' };\n      }\n    }\n    // 2. Jika ID tidak cocok, cari berdasarkan nama kategori di event yang sama\n    if (namaKategori) {\n      for (var j = 1; j < rows.length; j++) {\n        var rEvent = String(rows[j][1] || '').trim().toLowerCase();\n        var rName = String(rows[j][2] || '').trim().toLowerCase();\n        if (rName === namaKategori.toLowerCase() && (!idEvent || rEvent === idEvent.toLowerCase())) {\n          updateRowByHeaders(sheet, j + 1, catObj);\n          return { status: 'success', message: 'Cabang lomba berhasil diperbarui' };\n        }\n      }\n    }\n    return { status: 'error', message: 'Cabang lomba tidak ditemukan untuk diperbarui' };\n  }\n\n  // Operasi Create: Cek apakah nama atau id kategori sudah pernah ada agar tidak timbul baris ganda\n  for (var k = 1; k < rows.length; k++) {\n    var exId = String(rows[k][0] || '').trim().toLowerCase();\n    var exEvent = String(rows[k][1] || '').trim().toLowerCase();\n    var exName = String(rows[k][2] || '').trim().toLowerCase();\n\n    if ((exId === idKategori.toLowerCase()) || \n        (namaKategori && exName === namaKategori.toLowerCase() && (!idEvent || exEvent === idEvent.toLowerCase()))) {\n      updateRowByHeaders(sheet, k + 1, catObj);\n      return { status: 'success', message: 'Cabang lomba sudah ada, data berhasil disinkronkan' };\n    }\n  }\n\n  appendRowByHeaders(sheet, catObj);\n  return { status: 'success', message: 'Cabang lomba berhasil ditambahkan' };\n}\n\nfunction handleManageTeam(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.TEAMS);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.TEAMS);\n  }\n\n  ensureHeaderExists(sheet, 'ketua_regu');\n  ensureHeaderExists(sheet, 'motto');\n  ensureHeaderExists(sheet, 'tipe_partisipasi');\n\n  var op = data.operation || 'create';\n  var idTeam = String(data.id_team || ('team-' + new Date().getTime()));\n  var rows = sheet.getDataRange().getValues();\n\n  if (op === 'delete') {\n    for (var r = 1; r < rows.length; r++) {\n      if (String(rows[r][0]) === idTeam) {\n        sheet.deleteRow(r + 1);\n        return { status: 'success', message: 'Peserta berhasil dihapus' };\n      }\n    }\n    return { status: 'error', message: 'Peserta tidak ditemukan' };\n  }\n\n  var anggotaStr = Array.isArray(data.anggota) ? JSON.stringify(data.anggota) : String(data.anggota || '[]');\n  var teamObj = {\n    id_team: idTeam,\n    id_event: data.id_event || 'duta-camp-2026',\n    nama_regu: data.nama_regu || '',\n    kelas_pangkalan: data.kelas_pangkalan || '',\n    kategori_regu: data.kategori_regu || 'Putra',\n    foto_url: data.foto_url || '',\n    anggota: anggotaStr,\n    ketua_regu: data.ketua_regu || '',\n    motto: data.motto || '',\n    tipe_partisipasi: data.tipe_partisipasi || 'Group'\n  };\n\n  if (op === 'update') {\n    for (var i = 1; i < rows.length; i++) {\n      if (String(rows[i][0]) === idTeam) {\n        updateRowByHeaders(sheet, i + 1, teamObj);\n        return { status: 'success', message: 'Data peserta berhasil diperbarui' };\n      }\n    }\n  }\n\n  appendRowByHeaders(sheet, teamObj);\n  return { status: 'success', message: 'Peserta berhasil ditambahkan' };\n}\n\nfunction handleManageJury(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.USERS);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.USERS);\n  }\n\n  var op = data.operation || 'create';\n  var rows = sheet.getDataRange().getValues();\n\n  function norm(str) {\n    if (!str) return '';\n    return String(str).trim().toLowerCase().replace(/^@+/, '');\n  }\n\n  var targetId = norm(data.id || data.id_jury);\n  var targetUser = norm(data.username);\n  var targetName = norm(data.nama);\n\n  if (op === 'delete') {\n    var deleted = false;\n    var deletedUsernames = [];\n    var deletedIds = [];\n\n    // Loop dari bawah ke atas agar indeks baris aman saat deleteRow\n    for (var r = rows.length - 1; r >= 1; r--) {\n      var rowId = norm(rows[r][0]);\n      var rowUsername = norm(rows[r][1]);\n      var rowName = norm(rows[r][3]);\n      var rowRole = norm(rows[r][4]);\n\n      // Fleksibilitas pencocokan:\n      // 1. ID sama persis atau sama tanpa prefix 'user-' atau 'jury-'\n      var idMatch = targetId && (\n        rowId === targetId ||\n        rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, '')\n      );\n      // 2. Username sama (dengan atau tanpa tanda @)\n      var userMatch = targetUser && (\n        rowUsername === targetUser ||\n        rowUsername === targetId.replace(/^(user|jury)-/, '') ||\n        rowId.replace(/^(user|jury)-/, '') === targetUser\n      );\n      // 3. ID di frontend sama dengan Username di sheet (atau sebaliknya)\n      var crossMatch = (targetId && (rowUsername === targetId || rowUsername === targetId.replace(/^(user|jury)-/, ''))) ||\n                       (targetUser && (rowId === targetUser || rowId.replace(/^(user|jury)-/, '') === targetUser));\n      // 4. Nama lengkap sama\n      var nameMatch = targetName && (rowName === targetName);\n\n      if (idMatch || userMatch || crossMatch || nameMatch) {\n        if (rowUsername) deletedUsernames.push(rowUsername);\n        if (rowId) deletedIds.push(rowId);\n        sheet.deleteRow(r + 1);\n        deleted = true;\n      }\n    }\n\n    if (deleted) {\n      // Bersihkan juga nilai di Jury_Scores yang terkait dengan juri ini\n      try {\n        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);\n        if (scoreSheet) {\n          var sRows = scoreSheet.getDataRange().getValues();\n          for (var s = sRows.length - 1; s >= 1; s--) {\n            var sJuryId = norm(sRows[s][1]);\n            var sJuryName = norm(sRows[s][2]);\n            if ((targetId && sJuryId === targetId) ||\n                (targetUser && sJuryId === targetUser) ||\n                (targetName && sJuryName === targetName) ||\n                deletedIds.indexOf(sJuryId) >= 0 ||\n                deletedUsernames.indexOf(sJuryId) >= 0) {\n              scoreSheet.deleteRow(s + 1);\n            }\n          }\n        }\n      } catch (scoreErr) {\n        Logger.log('Error cleaning jury scores: ' + scoreErr);\n      }\n      return { status: 'success', message: 'Akun juri berhasil dihapus permanen dari Google Sheets' };\n    }\n    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets (ID: ' + targetId + ', Username: ' + targetUser + ')' };\n  }\n\n  if (op === 'update') {\n    for (var i = 1; i < rows.length; i++) {\n      var rowId = norm(rows[i][0]);\n      var rowUsername = norm(rows[i][1]);\n      var rowName = norm(rows[i][3]);\n\n      var isMatch = (targetId && (rowId === targetId || rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, ''))) ||\n                    (targetUser && (rowUsername === targetUser || rowUsername === targetId.replace(/^(user|jury)-/, '') || rowId.replace(/^(user|jury)-/, '') === targetUser)) ||\n                    (targetName && rowName === targetName);\n\n      if (isMatch) {\n        var updateObj = {\n          username: targetUser,\n          nama: String(data.nama || ''),\n          jurySpecialty: String(data.jurySpecialty || '')\n        };\n        if (data.password) updateObj.password = String(data.password);\n        updateRowByHeaders(sheet, i + 1, updateObj);\n        return { status: 'success', message: 'Data juri berhasil diperbarui di Google Sheets' };\n      }\n    }\n    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets' };\n  }\n\n  // Create new jury\n  // 1. Verify username uniqueness in sheet\n  for (var u = 1; u < rows.length; u++) {\n    var existingUser = norm(rows[u][1]);\n    if (existingUser === targetUser) {\n      return { status: 'error', message: 'Username ' + targetUser + ' sudah digunakan di database Google Sheets' };\n    }\n  }\n\n  var newId = String(data.id || data.id_jury || ('jury-' + new Date().getTime()));\n  appendRowByHeaders(sheet, {\n    id: newId,\n    username: targetUser,\n    password: String(data.password || '123456'),\n    nama: String(data.nama || ''),\n    role: 'juri',\n    emailOrWa: '',\n    jurySpecialty: String(data.jurySpecialty || 'Dewan Juri Khusus'),\n    created_at: String(data.created_at || new Date().toISOString())\n  });\n\n  return { status: 'success', message: 'Akun juri berhasil dibuat di Google Sheets', id: newId };\n}\n\nfunction handleManageEvent(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.EVENTS);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.EVENTS);\n  }\n\n  var idEvent = data.id_event || ('event-' + new Date().getTime());\n  var op = data.operation || 'create';\n  var rows = sheet.getDataRange().getValues();\n\n  var eventObj = {\n    id_event: idEvent,\n    kode_event: data.kode_event || '',\n    nama_event: data.nama_event,\n    tahun: data.tahun || '2026',\n    status_aktif: data.status_aktif !== undefined ? data.status_aktif : true,\n    batas_waktu: data.batas_waktu || '',\n    deskripsi: data.deskripsi || ''\n  };\n\n  if (op === 'update') {\n    for (var i = 1; i < rows.length; i++) {\n      if (String(rows[i][0]) === idEvent) {\n        updateRowByHeaders(sheet, i + 1, eventObj);\n        return { status: 'success', message: 'Event berhasil diperbarui' };\n      }\n    }\n  }\n\n  appendRowByHeaders(sheet, eventObj);\n  return { status: 'success', message: 'Event berhasil ditambahkan' };\n}\n\nfunction handleToggleEventStatus(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.EVENTS);\n  if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };\n  var rows = sheet.getDataRange().getValues();\n  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };\n  var headers = rows[0];\n  var statusColIdx = -1;\n  var tahunColIdx = -1;\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c]).trim().toLowerCase();\n    if (h === 'status_aktif') statusColIdx = c + 1;\n    if (h === 'tahun') tahunColIdx = c + 1;\n  }\n  var updated = false;\n  for (var i = 1; i < rows.length; i++) {\n    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {\n      var isAct = (data.is_active === true || String(data.is_active).toLowerCase() === 'true');\n      if (statusColIdx > 0) sheet.getRange(i + 1, statusColIdx).setValue(isAct);\n      if (tahunColIdx > 0 && typeof rows[i][tahunColIdx - 1] === 'boolean') {\n        sheet.getRange(i + 1, tahunColIdx).setValue(isAct);\n      }\n      // Set column 3 and column 5 to guarantee both standard & shifted layouts stay in sync\n      sheet.getRange(i + 1, 3).setValue(isAct);\n      sheet.getRange(i + 1, 5).setValue(isAct);\n      updated = true;\n    }\n  }\n  if (updated) {\n    return { status: 'success', message: 'Status event berhasil diubah' };\n  }\n  return { status: 'error', message: 'Event tidak ditemukan' };\n}\n\nfunction handleUpdateEventDeadline(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.EVENTS);\n  if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };\n  var rows = sheet.getDataRange().getValues();\n  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };\n  var headers = rows[0];\n  var deadlineColIdx = -1;\n  for (var c = 0; c < headers.length; c++) {\n    var h = String(headers[c]).trim().toLowerCase();\n    if (h === 'batas_waktu') deadlineColIdx = c + 1;\n  }\n  var updated = false;\n  for (var i = 1; i < rows.length; i++) {\n    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {\n      if (deadlineColIdx > 0) {\n        sheet.getRange(i + 1, deadlineColIdx).setValue(data.deadline || '');\n      } else {\n        sheet.getRange(i + 1, 6).setValue(data.deadline || '');\n      }\n      updated = true;\n    }\n  }\n  if (updated) {\n    return { status: 'success', message: 'Batas waktu berhasil disimpan' };\n  }\n  return { status: 'error', message: 'Event tidak ditemukan' };\n}\n\nfunction getSheetDataAsObjects(sheet) {\n  if (!sheet) return [];\n  var rows = sheet.getDataRange().getValues();\n  if (rows.length <= 1) return [];\n  var headers = rows[0];\n  var results = [];\n  for (var r = 1; r < rows.length; r++) {\n    var row = rows[r];\n    var obj = {};\n    for (var c = 0; c < headers.length; c++) {\n      obj[String(headers[c]).trim()] = row[c];\n    }\n    results.push(obj);\n  }\n  return results;\n}\n\n/**\n * =========================================================================\n * PERTANYAAN / KRITERIA DEWAN JURI (PERSISTENSI RESMI GOOGLE SHEETS)\n * =========================================================================\n */\nfunction handleUpdateCategoryCriteria(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);\n  if (!sheet) {\n    setupDatabaseSheets();\n    sheet = ss.getSheetByName(SHEETS.CATEGORIES);\n  }\n\n  var idKategori = String(data.id_kategori || '').trim();\n  if (!idKategori) {\n    return { status: 'error', message: 'ID Kategori tidak disertakan' };\n  }\n\n  ensureHeaderExists(sheet, 'kriteria');\n  var rows = sheet.getDataRange().getValues();\n  if (rows.length <= 1) {\n    return { status: 'error', message: 'Data kategori di spreadsheet masih kosong' };\n  }\n\n  var headers = rows[0];\n  var idCol = headers.indexOf('id_kategori');\n  var kriteriaCol = headers.indexOf('kriteria');\n  if (idCol === -1) idCol = 0;\n  if (kriteriaCol === -1) kriteriaCol = 7;\n\n  var kriteriaStr = Array.isArray(data.kriteria)\n    ? JSON.stringify(data.kriteria)\n    : String(data.kriteria || '[]');\n\n  var found = false;\n  for (var r = 1; r < rows.length; r++) {\n    if (String(rows[r][idCol]).trim() === idKategori) {\n      sheet.getRange(r + 1, kriteriaCol + 1).setValue(kriteriaStr);\n      found = true;\n      break;\n    }\n  }\n\n  if (!found) {\n    return { status: 'error', message: 'Cabang lomba dengan ID ' + idKategori + ' tidak ditemukan di sheet Categories' };\n  }\n\n  return {\n    status: 'success',\n    message: 'Kriteria pertanyaan dewan juri berhasil disimpan permanen ke Google Sheets!',\n    id_kategori: idKategori,\n    kriteria: data.kriteria\n  };\n}\n\n/**\n * =========================================================================\n * FUNGSI AKTIVASI IZIN GOOGLE DRIVE (PENTING DIBACA)\n * =========================================================================\n * Jika muncul error: \"You do not have permission to call DriveApp...\",\n * ikuti langkah mudah berikut:\n * 1. Di editor Apps Script, pada dropdown fungsi di samping tombol \"Run / Jalankan\",\n *    pilih fungsi \"authorizeDriveApp\".\n * 2. Klik tombol ▶ \"Run\" (Jalankan).\n * 3. Google akan menampilkan popup \"Authorization Required\" (Izin Diperlukan).\n * 4. Klik \"Review Permissions\" -> Pilih Akun Google Anda -> Klik \"Advanced\" -> Klik \"Go to ... (unsafe)\" -> Klik \"Allow\".\n * 5. Buat deployment versi baru:\n *    Klik \"Deploy\" -> \"Manage deployments\" -> Ikon Pensil (Edit) -> Versi: \"New version\" -> Klik \"Deploy\".\n */\nfunction authorizeDriveApp() {\n  try {\n    var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);\n    // PENTING: Wajib memanggil createFile agar Google Apps Script memicu popup izin TULIS (WRITE): https://www.googleapis.com/auth/drive\n    var testFile = folder.createFile('auth_test.txt', 'Otorisasi Google Drive Berhasil');\n    testFile.setTrashed(true); // Langsung pindahkan file pengujian ke sampah\n    Logger.log('Otorisasi Google Drive Berhasil Penuh! Hak tulis (createFile) aktif di folder: ' + folder.getName() + ' (ID: ' + folder.getId() + ')');\n    return 'Otorisasi Berhasil Penuh: ' + folder.getName();\n  } catch (e) {\n    Logger.log('Error otorisasi Drive: ' + e);\n    throw e;\n  }\n}\n\n/**\n * =========================================================================\n * GOOGLE DRIVE LOGO & ASSET UPLOADER\n * Menyimpan Logo Sekolah / Kegiatan ke Google Drive Folder Khusus\n * Folder ID Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7 (Logo dan Laporan)\n * =========================================================================\n */\nfunction handleUploadLogoToDrive(data) {\n  try {\n    var targetFolderId = String(data.folderId || DRIVE_FOLDER_ID).trim();\n    if (!targetFolderId) {\n      targetFolderId = DRIVE_FOLDER_ID;\n    }\n\n    var folder = null;\n    try {\n      folder = DriveApp.getFolderById(targetFolderId);\n    } catch (err1) {\n      var errStr = err1.toString();\n      if (errStr.indexOf('permission') > -1 || errStr.indexOf('DriveApp') > -1) {\n        return {\n          status: 'error',\n          message: 'Izin Google Drive belum diaktifkan di Google Apps Script. Solusi: Buka editor Apps Script, pilih fungsi \"authorizeDriveApp\", klik Run/Jalankan, lalu klik \"Allow\" dan Deploy versi baru.'\n        };\n      }\n      return {\n        status: 'error',\n        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak dapat diakses: ' + errStr + '. Pastikan folder dibagikan (Shared) dengan akun Google ini sebagai Editor.'\n      };\n    }\n\n    if (!folder) {\n      return {\n        status: 'error',\n        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak ditemukan. Pastikan folder sudah dibuat dan dapat diakses.'\n      };\n    }\n\n    var base64Data = data.base64 || data.base64Data || '';\n    if (base64Data.indexOf(';base64,') > -1) {\n      base64Data = base64Data.split(';base64,')[1];\n    }\n\n    if (!base64Data) {\n      return { status: 'error', message: 'Data gambar base64 kosong' };\n    }\n\n    var mimeType = data.mimeType || 'image/png';\n    var logoTitle = String(data.logoTitle || data.name || '').trim();\n    \n    // Tentukan ekstensi file\n    var ext = '.png';\n    if (mimeType.indexOf('jpeg') > -1 || mimeType.indexOf('jpg') > -1) {\n      ext = '.jpg';\n    } else if (mimeType.indexOf('svg') > -1) {\n      ext = '.svg';\n    } else if (mimeType.indexOf('webp') > -1) {\n      ext = '.webp';\n    }\n\n    // Tentukan nama file rapi di Google Drive sesuai input nama pengguna\n    var fileName = '';\n    if (logoTitle) {\n      var safeTitle = logoTitle.replace(/[\\\\/:*?\"<>|]/g, ' ').trim();\n      fileName = safeTitle + ext;\n    } else if (data.fileName) {\n      fileName = data.fileName;\n    } else {\n      fileName = 'logo_' + new Date().getTime() + ext;\n    }\n\n    var decodedBytes = Utilities.base64Decode(base64Data);\n    var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);\n    var file = folder.createFile(blob);\n\n    try {\n      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);\n    } catch (shareErr) {\n      Logger.log('Set sharing warning: ' + shareErr);\n    }\n\n    var fileId = file.getId();\n    var directViewUrl = 'https://lh3.googleusercontent.com/d/' + fileId;\n    var downloadUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;\n\n    var logoEntry = {\n      id: 'logo_' + fileId,\n      name: logoTitle || fileName.replace(/\\.[^/.]+$/, \"\"),\n      url: directViewUrl,\n      driveFileId: fileId,\n      fileName: file.getName(),\n      folderId: folder.getId(),\n      folderName: folder.getName(),\n      type: data.type || 'olahraga',\n      created_at: new Date().toISOString()\n    };\n\n    // Otomatis simpan logo baru ke pustaka logo (Config sheet)\n    saveUploadedLogoToConfig(logoEntry);\n\n    return {\n      status: 'success',\n      fileId: fileId,\n      fileUrl: directViewUrl,\n      downloadUrl: downloadUrl,\n      fileName: file.getName(),\n      folderName: folder.getName(),\n      folderId: folder.getId(),\n      logoEntry: logoEntry,\n      message: 'Logo \"' + logoEntry.name + '\" berhasil diunggah ke Google Drive di folder \"' + folder.getName() + '\"!'\n    };\n  } catch (err) {\n    return { status: 'error', message: 'Gagal mengunggah logo ke Google Drive: ' + err.toString() };\n  }\n}\n\n/**\n * Membaca seluruh file gambar langsung dari Google Drive Folder\n * Folder Default: 1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7 (Logo dan Laporan)\n */\nfunction getLogosFromDriveFolder(folderId) {\n  var targetId = String(folderId || DRIVE_FOLDER_ID).trim();\n  if (!targetId) targetId = DRIVE_FOLDER_ID;\n  var logos = [];\n  try {\n    var folder = DriveApp.getFolderById(targetId);\n    if (!folder) return logos;\n    var files = folder.getFiles();\n    while (files.hasNext()) {\n      var file = files.next();\n      var name = file.getName();\n      if (name === 'auth_test.txt') continue;\n      var mime = String(file.getMimeType() || '').toLowerCase();\n      // Filter tipe gambar\n      if (mime.indexOf('image/') === 0 || /\\.(png|jpe?g|svg|webp|gif|bmp)$/i.test(name)) {\n        var fileId = file.getId();\n        try {\n          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);\n        } catch (shareErr) {}\n        var cleanTitle = name.replace(/\\.[^/.]+$/, \"\");\n        logos.push({\n          id: 'logo_' + fileId,\n          name: cleanTitle,\n          url: 'https://lh3.googleusercontent.com/d/' + fileId,\n          driveFileId: fileId,\n          fileName: name,\n          folderId: folder.getId(),\n          folderName: folder.getName(),\n          type: 'olahraga',\n          created_at: file.getDateCreated() ? file.getDateCreated().toISOString() : new Date().toISOString()\n        });\n      }\n    }\n  } catch (err) {\n    Logger.log('getLogosFromDriveFolder error: ' + err);\n  }\n  return logos;\n}\n\n/**\n * Sinkronisasi berkas Google Drive Folder dengan metadata di Config Sheet\n */\nfunction syncAndGetDriveLogos(folderId) {\n  var driveLogos = getLogosFromDriveFolder(folderId);\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');\n  var existingList = [];\n  if (sheet) {\n    var rows = sheet.getDataRange().getValues();\n    for (var r = 1; r < rows.length; r++) {\n      if (String(rows[r][0]).trim() === 'uploaded_logos') {\n        try {\n          existingList = JSON.parse(rows[r][1]);\n          if (!Array.isArray(existingList)) existingList = [];\n        } catch (e) {\n          existingList = [];\n        }\n        break;\n      }\n    }\n  }\n\n  var mergedMap = {};\n  for (var d = 0; d < driveLogos.length; d++) {\n    var dl = driveLogos[d];\n    mergedMap[dl.driveFileId] = dl;\n  }\n  for (var ex = 0; ex < existingList.length; ex++) {\n    var itm = existingList[ex];\n    if (itm && (itm.driveFileId || itm.id)) {\n      var k = itm.driveFileId || itm.id;\n      if (mergedMap[k]) {\n        mergedMap[k] = Object.assign({}, mergedMap[k], itm);\n      } else if (itm.url) {\n        mergedMap[k] = itm;\n      }\n    }\n  }\n\n  var finalList = [];\n  for (var mk in mergedMap) {\n    finalList.push(mergedMap[mk]);\n  }\n\n  if (finalList.length > 0) {\n    saveUploadedLogoListToConfig(finalList);\n  }\n\n  return finalList;\n}\n\nfunction saveUploadedLogoListToConfig(list) {\n  try {\n    var ss = SpreadsheetApp.getActiveSpreadsheet();\n    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');\n    if (!sheet) {\n      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');\n      sheet.appendRow(['key', 'value', 'updated_at']);\n      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');\n    }\n    var rows = sheet.getDataRange().getValues();\n    var rowIndex = -1;\n    for (var r = 1; r < rows.length; r++) {\n      if (String(rows[r][0]).trim() === 'uploaded_logos') {\n        rowIndex = r + 1;\n        break;\n      }\n    }\n    var valStr = JSON.stringify(list);\n    var ts = new Date().toISOString();\n    if (rowIndex > -1) {\n      sheet.getRange(rowIndex, 2).setValue(valStr);\n      sheet.getRange(rowIndex, 3).setValue(ts);\n    } else {\n      sheet.appendRow(['uploaded_logos', valStr, ts]);\n    }\n  } catch (err) {\n    Logger.log('Gagal menyimpan uploaded_logos: ' + err);\n  }\n}\n\n/**\n * Menyimpan metadata logo yang berhasil diunggah ke Config Sheet agar tersinkronisasi ke seluruh perangkat\n */\nfunction saveUploadedLogoToConfig(logoEntry) {\n  try {\n    var ss = SpreadsheetApp.getActiveSpreadsheet();\n    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');\n    if (!sheet) {\n      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');\n      sheet.appendRow(['key', 'value', 'updated_at']);\n      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');\n    }\n\n    var currentList = [];\n    var rows = sheet.getDataRange().getValues();\n    var rowIndex = -1;\n    for (var r = 1; r < rows.length; r++) {\n      if (String(rows[r][0]).trim() === 'uploaded_logos') {\n        rowIndex = r + 1;\n        try {\n          currentList = JSON.parse(rows[r][1]);\n          if (!Array.isArray(currentList)) currentList = [];\n        } catch (e) {\n          currentList = [];\n        }\n        break;\n      }\n    }\n\n    // Cek apakah logo dengan fileId sama sudah ada\n    var existingIdx = -1;\n    for (var i = 0; i < currentList.length; i++) {\n      if (currentList[i].driveFileId === logoEntry.driveFileId || currentList[i].name === logoEntry.name) {\n        existingIdx = i;\n        break;\n      }\n    }\n\n    if (existingIdx > -1) {\n      currentList[existingIdx] = logoEntry;\n    } else {\n      currentList.unshift(logoEntry);\n    }\n\n    var ts = new Date().toISOString();\n    var valStr = JSON.stringify(currentList);\n\n    if (rowIndex > -1) {\n      sheet.getRange(rowIndex, 2).setValue(valStr);\n      sheet.getRange(rowIndex, 3).setValue(ts);\n    } else {\n      sheet.appendRow(['uploaded_logos', valStr, ts]);\n    }\n  } catch (err) {\n    Logger.log('Gagal menyimpan logo ke Config sheet: ' + err);\n  }\n}\n\n/**\n * =========================================================================\n * PENGATURAN KOP & REKAPITULASI (PERSISTENSI RESMI GOOGLE SHEETS)\n * Menyimpan Nama Kepala Sekolah, Ketua Panitia, Kota, dan Link Logo Drive\n * =========================================================================\n */\nfunction handleSaveConfig(data) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');\n  if (!sheet) {\n    sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');\n    sheet.appendRow(['key', 'value', 'updated_at']);\n    sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');\n  }\n\n  var key = String(data.key || '').trim();\n  var value = typeof data.value === 'object' ? JSON.stringify(data.value) : String(data.value || '');\n  var ts = new Date().toISOString();\n\n  if (!key) return { status: 'error', message: 'Key config tidak boleh kosong' };\n\n  var rows = sheet.getDataRange().getValues();\n  for (var r = 1; r < rows.length; r++) {\n    if (String(rows[r][0]).trim() === key) {\n      sheet.getRange(r + 1, 2).setValue(value);\n      sheet.getRange(r + 1, 3).setValue(ts);\n      return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil diperbarui di Google Sheets.' };\n    }\n  }\n\n  sheet.appendRow([key, value, ts]);\n  return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil disimpan di Google Sheets.' };\n}\n\nfunction handleGetConfig(key) {\n  var ss = SpreadsheetApp.getActiveSpreadsheet();\n  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');\n  if (!sheet) return { status: 'error', message: 'Sheet Config belum tersedia' };\n  var rows = sheet.getDataRange().getValues();\n  for (var r = 1; r < rows.length; r++) {\n    if (String(rows[r][0]).trim() === String(key).trim()) {\n      var val = rows[r][1];\n      try {\n        val = JSON.parse(val);\n      } catch (e) {}\n      return { status: 'success', key: key, value: val };\n    }\n  }\n  return { status: 'error', message: 'Key config tidak ditemukan' };\n}\n\nfunction getConfigsMap(sheet) {\n  var map = {};\n  if (!sheet) return map;\n  try {\n    var rows = sheet.getDataRange().getValues();\n    for (var r = 1; r < rows.length; r++) {\n      var key = String(rows[r][0] || '').trim();\n      var val = rows[r][1];\n      if (key) {\n        try {\n          map[key] = JSON.parse(val);\n        } catch (e) {\n          map[key] = val;\n        }\n      }\n    }\n  } catch (e) {\n    Logger.log('Error getConfigsMap: ' + e);\n  }\n  return map;\n}\n";
+export const GAS_SCRIPT_CODE = `/**
+ * =========================================================================
+ * GOOGLE APPS SCRIPT (GAS) - DATABASE ENGINE E-VOTING & SCORING SYSTEM
+ * SMPIT PONDOK DUTA - DATABASE RESMI (CLOUD SPREADSHEET)
+ * =========================================================================
+ * File ini bertindak sebagai Database Backend Utama yang melayani:
+ * - Autentikasi Pengguna & Hak Akses (Admin, Dewan Juri, Pemilih Bebas)
+ * - Penyimpanan Sub-Event, Cabang Lomba, Peserta/Regu
+ * - Penyimpanan Link Siaran Langsung (TikTok, YouTube, Instagram) di Tab Categories
+ * - Penyimpanan Nilai Real-time Dewan Juri & Hak Suara Voting Publik
+ * =========================================================================
+ */
+
+var SHEETS = {
+  USERS: 'Users',
+  EVENTS: 'Events',
+  CATEGORIES: 'Categories',
+  TEAMS: 'Teams',
+  JURY_SCORES: 'Jury_Scores',
+  PUBLIC_VOTES: 'Public_Votes',
+  CONFIG: 'Config'
+};
+
+// ID Google Drive Folder Resmi Penyimpanan Aset & Logo (SMPIT Pondok Duta - Logo dan Laporan)
+var DRIVE_FOLDER_ID = '1NYeRMDn9xWTihaDK6LvHy97KoOTleqK7';
+
+var SCHEMAS = [
+  {
+    name: SHEETS.USERS,
+    headers: ['id', 'username', 'password', 'nama', 'role', 'emailOrWa', 'jurySpecialty', 'created_at']
+  },
+  {
+    name: SHEETS.EVENTS,
+    headers: ['id_event', 'kode_event', 'nama_event', 'tahun', 'status_aktif', 'batas_waktu', 'deskripsi']
+  },
+  {
+    name: SHEETS.CATEGORIES,
+    headers: [
+      'id_kategori',
+      'id_event',
+      'nama_kategori',
+      'tipe',
+      'assessment_type',
+      'tipe_peserta',
+      'votes_required',
+      'kriteria',
+      'deskripsi',
+      'assigned_juries',
+      'live_tiktok',
+      'live_youtube',
+      'live_instagram',
+      'voting_start',
+      'voting_end'
+    ]
+  },
+  {
+    name: SHEETS.TEAMS,
+    headers: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota', 'ketua_regu', 'motto', 'tipe_partisipasi']
+  },
+  {
+    name: SHEETS.JURY_SCORES,
+    headers: ['id_score', 'id_jury', 'jury_name', 'id_team', 'id_kategori', 'skor_1_to_5', 'catatan', 'kriteria_scores', 'is_final', 'timestamp']
+  },
+  {
+    name: SHEETS.PUBLIC_VOTES,
+    headers: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp']
+  },
+  {
+    name: SHEETS.CONFIG,
+    headers: ['key', 'value', 'updated_at']
+  }
+];
+
+function setupDatabaseSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  SCHEMAS.forEach(function(schema) {
+    var sheet = ss.getSheetByName(schema.name);
+    if (!sheet) {
+      sheet = ss.insertSheet(schema.name);
+    }
+
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(schema.headers);
+      sheet.getRange(1, 1, 1, schema.headers.length)
+        .setFontWeight('bold')
+        .setBackground('#064e3b')
+        .setFontColor('#ffffff');
+      sheet.setFrozenRows(1);
+    } else {
+      var existingHeaders = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), 1)).getValues()[0];
+      for (var h = 0; h < schema.headers.length; h++) {
+        var headerName = schema.headers[h];
+        if (existingHeaders.indexOf(headerName) === -1) {
+          var nextCol = sheet.getLastColumn() + 1;
+          sheet.getRange(1, nextCol).setValue(headerName)
+            .setFontWeight('bold')
+            .setBackground('#064e3b')
+            .setFontColor('#ffffff');
+        }
+      }
+    }
+  });
+
+  return { status: 'success', message: 'Database Google Sheets berhasil disiapkan dan diperbarui!' };
+}
+
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : 'ping';
+  var response = {};
+  try {
+    if (action === 'ping') {
+      response = { status: 'success', message: 'Database Google Sheets Aktif & Terhubung', timestamp: new Date().toISOString() };
+    } else if (action === 'getAllData') {
+      response = { status: 'success', data: getAllDatabaseData() };
+    } else if (action === 'setup') {
+      response = setupDatabaseSheets();
+    } else if (action === 'getDriveLogos' || action === 'syncDriveLogos') {
+      response = { status: 'success', logos: syncAndGetDriveLogos() };
+    } else {
+      response = { status: 'error', message: 'Action GET tidak dikenali: ' + action };
+    }
+  } catch (err) {
+    response = { status: 'error', message: err.toString() };
+  }
+  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  var response = {};
+  try {
+    var body = {};
+    if (e.postData && e.postData.contents) {
+      body = JSON.parse(e.postData.contents);
+    } else if (e.parameter) {
+      body = e.parameter;
+    }
+    var action = body.action || '';
+
+    switch (action) {
+      case 'ping':
+        response = { status: 'success', message: 'Koneksi database berhasil.' };
+        break;
+      case 'setupSheets':
+        response = setupDatabaseSheets();
+        break;
+      case 'getAllData':
+        response = { status: 'success', data: getAllDatabaseData() };
+        break;
+      case 'getDriveLogos':
+      case 'syncDriveLogos':
+        response = { status: 'success', logos: syncAndGetDriveLogos(body.folderId) };
+        break;
+      case 'login':
+        response = handleLogin(body.username, body.password);
+        break;
+      case 'register':
+        response = handleRegister(body);
+        break;
+      case 'submitJuryScore':
+        response = handleSubmitJuryScore(body);
+        break;
+      case 'submitPublicVote':
+        response = handleSubmitPublicVote(body);
+        break;
+      case 'removePublicVote':
+      case 'cancelPublicVote':
+        response = handleRemovePublicVote(body);
+        break;
+      case 'updateCategoryCriteria':
+        response = handleUpdateCategoryCriteria(body);
+        break;
+      case 'updateCategoryLiveLinks':
+        response = handleUpdateCategoryLiveLinks(body);
+        break;
+      case 'uploadLogo':
+        response = handleUploadLogoToDrive(body);
+        break;
+      case 'saveConfig':
+        response = handleSaveConfig(body);
+        break;
+      case 'getConfig':
+        response = handleGetConfig(body.key);
+        break;
+      case 'manageCategory':
+      case 'purgeCategory':
+        response = handleManageCategory(body);
+        break;
+      case 'manageTeam':
+        response = handleManageTeam(body);
+        break;
+      case 'manageJury':
+        response = handleManageJury(body);
+        break;
+      case 'manageEvent':
+        response = handleManageEvent(body);
+        break;
+      case 'toggleEventStatus':
+        response = handleToggleEventStatus(body);
+        break;
+      case 'updateEventDeadline':
+        response = handleUpdateEventDeadline(body);
+        break;
+      default:
+        response = { status: 'error', message: 'Action POST tidak valid: ' + action };
+    }
+  } catch (err) {
+    response = { status: 'error', message: err.toString() };
+  }
+  return ContentService.createTextOutput(JSON.stringify(response)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function getAllDatabaseData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  fixUserRowsAlignment();
+
+  var teamSheet = ss.getSheetByName(SHEETS.TEAMS);
+  if (teamSheet) {
+    ensureHeaderExists(teamSheet, 'ketua_regu');
+    ensureHeaderExists(teamSheet, 'motto');
+    ensureHeaderExists(teamSheet, 'tipe_partisipasi');
+  }
+
+  var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (catSheet) {
+    ensureHeaderExists(catSheet, 'assigned_juries');
+    ensureHeaderExists(catSheet, 'live_tiktok');
+    ensureHeaderExists(catSheet, 'live_youtube');
+    ensureHeaderExists(catSheet, 'live_instagram');
+    ensureHeaderExists(catSheet, 'voting_start');
+    ensureHeaderExists(catSheet, 'voting_end');
+  }
+
+  var configMap = getConfigsMap(ss.getSheetByName(SHEETS.CONFIG || 'Config'));
+
+  try {
+    var driveFiles = getLogosFromDriveFolder(DRIVE_FOLDER_ID);
+    if (driveFiles && driveFiles.length > 0) {
+      var existingUploaded = configMap.uploaded_logos || [];
+      if (!Array.isArray(existingUploaded)) existingUploaded = [];
+      var mergedMap = {};
+      for (var d = 0; d < driveFiles.length; d++) {
+        var df = driveFiles[d];
+        mergedMap[df.driveFileId] = df;
+      }
+      for (var ex = 0; ex < existingUploaded.length; ex++) {
+        var itm = existingUploaded[ex];
+        if (itm && (itm.driveFileId || itm.id)) {
+          var k = itm.driveFileId || itm.id;
+          if (mergedMap[k]) {
+            mergedMap[k] = Object.assign({}, mergedMap[k], itm);
+          } else if (itm.url) {
+            mergedMap[k] = itm;
+          }
+        }
+      }
+      var mergedList = [];
+      for (var mk in mergedMap) {
+        mergedList.push(mergedMap[mk]);
+      }
+      configMap.uploaded_logos = mergedList;
+      saveUploadedLogoListToConfig(mergedList);
+    }
+  } catch (driveErr) {
+    Logger.log('Drive folder scanning skipped in getAllDatabaseData: ' + driveErr);
+  }
+
+  return {
+    users: getSheetDataAsObjects(ss.getSheetByName(SHEETS.USERS)),
+    events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),
+    categories: getSheetDataAsObjects(catSheet),
+    teams: getSheetDataAsObjects(teamSheet),
+    jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
+    public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),
+    config: configMap
+  };
+}
+
+function appendRowByHeaders(sheet, dataObj) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var row = [];
+  for (var i = 0; i < headers.length; i++) {
+    var key = String(headers[i]).trim();
+    var val = dataObj[key];
+    if (val === undefined || val === null) {
+      row.push('');
+    } else if (typeof val === 'object') {
+      row.push(JSON.stringify(val));
+    } else {
+      row.push(val);
+    }
+  }
+  sheet.appendRow(row);
+  return row;
+}
+
+function updateRowByHeaders(sheet, rowIndex, dataObj) {
+  var lastCol = Math.max(sheet.getLastColumn(), 1);
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i < headers.length; i++) {
+    var key = String(headers[i]).trim();
+    if (dataObj[key] !== undefined) {
+      var val = dataObj[key];
+      if (typeof val === 'object' && val !== null) {
+        val = JSON.stringify(val);
+      }
+      sheet.getRange(rowIndex, i + 1).setValue(val);
+    }
+  }
+}
+
+function ensureHeaderExists(sheet, headerName) {
+  try {
+    var lastCol = Math.max(sheet.getLastColumn(), 1);
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    for (var i = 0; i < headers.length; i++) {
+      if (String(headers[i]).trim().toLowerCase() === String(headerName).trim().toLowerCase()) return;
+    }
+    sheet.getRange(1, lastCol + 1).setValue(headerName)
+      .setFontWeight('bold')
+      .setBackground('#064e3b')
+      .setFontColor('#ffffff');
+  } catch (e) {
+    Logger.log('ensureHeaderExists error: ' + e);
+  }
+}
+
+function fixUserRowsAlignment() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.USERS);
+    if (!sheet) return;
+    var rows = sheet.getDataRange().getValues();
+    if (rows.length <= 1) return;
+    var headers = rows[0];
+    var emailCol = headers.indexOf('emailOrWa');
+    var createdCol = headers.indexOf('created_at');
+    var specialtyCol = headers.indexOf('jurySpecialty');
+
+    for (var r = 1; r < rows.length; r++) {
+      var createdAtVal = String(rows[r][createdCol] || '').trim();
+      if (createdAtVal && !createdAtVal.includes('T') && /^[0-9+]+$/.test(createdAtVal)) {
+        var realPhone = createdAtVal;
+        var realTimestamp = (specialtyCol >= 0 && String(rows[r][specialtyCol]).includes('T'))
+          ? String(rows[r][specialtyCol])
+          : new Date().toISOString();
+        if (emailCol >= 0) {
+          sheet.getRange(r + 1, emailCol + 1).setValue(realPhone);
+        }
+        sheet.getRange(r + 1, createdCol + 1).setValue(realTimestamp);
+        if (specialtyCol >= 0) {
+          sheet.getRange(r + 1, specialtyCol + 1).setValue('');
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('Auto fix user alignment skipped: ' + e);
+  }
+}
+
+function handleLogin(username, password) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.USERS);
+  if (!sheet) return { status: 'error', message: 'Sheet Users belum tersedia' };
+  var users = getSheetDataAsObjects(sheet);
+  var cleanUser = String(username || '').trim().toLowerCase();
+  var cleanPass = String(password || '').trim();
+
+  for (var i = 0; i < users.length; i++) {
+    var u = users[i];
+    if (String(u.username).trim().toLowerCase() === cleanUser) {
+      if (String(u.password).trim() === cleanPass) {
+        return {
+          status: 'success',
+          user: {
+            id: u.id,
+            username: u.username,
+            nama: u.nama,
+            role: u.role,
+            created_at: u.created_at
+          }
+        };
+      }
+      return { status: 'error', message: 'Password salah' };
+    }
+  }
+  return { status: 'error', message: 'Pengguna tidak ditemukan' };
+}
+
+function handleRegister(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.USERS);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.USERS);
+  }
+
+  var username = String(data.username || '').trim().toLowerCase();
+  var nama = String(data.nama || '').trim();
+  var password = String(data.password || '');
+  var emailOrWa = String(data.emailOrWa || '').trim();
+  if (!username || !password || !nama) return { status: 'error', message: 'Data registrasi tidak lengkap' };
+
+  var users = getSheetDataAsObjects(sheet);
+  for (var i = 0; i < users.length; i++) {
+    if (String(users[i].username).trim().toLowerCase() === username) {
+      return { status: 'error', message: 'Username sudah digunakan' };
+    }
+  }
+  var newId = 'voter-' + new Date().getTime();
+  var ts = new Date().toISOString();
+
+  appendRowByHeaders(sheet, {
+    id: newId,
+    username: username,
+    password: password,
+    nama: nama,
+    role: 'voter',
+    emailOrWa: emailOrWa,
+    jurySpecialty: '',
+    created_at: ts
+  });
+
+  return { status: 'success', user: { id: newId, username: username, nama: nama, role: 'voter' } };
+}
+
+function handleSubmitJuryScore(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+  }
+
+  var idJury = String(data.id_jury || '');
+  var juryName = String(data.jury_name || '');
+  var idTeam = String(data.id_team || '');
+  var idKategori = String(data.id_kategori || '');
+  var skor = parseFloat(data.skor_1_to_5 || 0);
+  var catatan = String(data.catatan || '');
+  var kriteriaScores = typeof data.kriteria_scores === 'object' ? JSON.stringify(data.kriteria_scores) : String(data.kriteria_scores || '{}');
+  var isFinal = data.is_final ? true : false;
+  var ts = new Date().toISOString();
+
+  var scoreObj = {
+    id_jury: idJury,
+    jury_name: juryName,
+    id_team: idTeam,
+    id_kategori: idKategori,
+    skor_1_to_5: skor,
+    catatan: catatan,
+    kriteria_scores: kriteriaScores,
+    is_final: isFinal,
+    timestamp: ts
+  };
+
+  var scores = getSheetDataAsObjects(sheet);
+  for (var r = 0; r < scores.length; r++) {
+    if (String(scores[r].id_jury) === idJury && String(scores[r].id_team) === idTeam && String(scores[r].id_kategori) === idKategori) {
+      updateRowByHeaders(sheet, r + 2, scoreObj);
+      return { status: 'success', message: 'Nilai juri berhasil diperbarui' };
+    }
+  }
+
+  scoreObj.id_score = data.id_score || ('score-' + new Date().getTime());
+  appendRowByHeaders(sheet, scoreObj);
+  return { status: 'success', message: 'Nilai juri berhasil disimpan' };
+}
+
+function handleSubmitPublicVote(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+  }
+
+  var idVote = String(data.id_vote || ('vote-' + new Date().getTime())).trim();
+  var idVoter = String(data.id_voter || '').trim();
+  var voterName = String(data.voter_name || '').trim();
+  var idTeam = String(data.id_team || '').trim();
+  var idKategori = String(data.id_kategori || '').trim();
+  var ts = String(data.timestamp || new Date().toISOString());
+
+  if (!idVoter || !idTeam || !idKategori) {
+    return { status: 'error', message: 'Data vote tidak lengkap (voter, regu, atau kategori kosong).' };
+  }
+
+  if (!voterName && idVoter) {
+    try {
+      var userSheet = ss.getSheetByName(SHEETS.USERS);
+      if (userSheet) {
+        var uRows = userSheet.getDataRange().getValues();
+        for (var u = 1; u < uRows.length; u++) {
+          if (String(uRows[u][0]).trim() === idVoter || String(uRows[u][1]).trim().toLowerCase() === idVoter.toLowerCase()) {
+            voterName = String(uRows[u][3] || uRows[u][1] || '').trim();
+            break;
+          }
+        }
+      }
+    } catch (uErr) {
+      Logger.log('Lookup user name error: ' + uErr);
+    }
+  }
+
+  var votes = getSheetDataAsObjects(sheet);
+  var userVotesInCat = 0;
+  for (var r = 0; r < votes.length; r++) {
+    var vVoter = String(votes[r].id_voter || '').trim();
+    var vCat = String(votes[r].id_kategori || '').trim();
+    var vTeam = String(votes[r].id_team || '').trim();
+
+    if (vVoter === idVoter && vCat === idKategori) {
+      if (vTeam === idTeam) {
+        return { status: 'error', message: 'Anda sudah memberikan suara untuk regu ini!' };
+      }
+      userVotesInCat++;
+    }
+  }
+
+  var maxQuota = data.votes_required ? parseInt(data.votes_required, 10) : 0;
+  if (!maxQuota || maxQuota < 1) {
+    try {
+      var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
+      if (catSheet) {
+        var cRows = catSheet.getDataRange().getValues();
+        for (var c = 1; c < cRows.length; c++) {
+          if (String(cRows[c][0]).trim().toLowerCase() === idKategori.toLowerCase()) {
+            maxQuota = parseInt(cRows[c][6] || 1, 10);
+            break;
+          }
+        }
+      }
+    } catch (cErr) {
+      Logger.log('Lookup category quota error: ' + cErr);
+    }
+  }
+  if (!maxQuota || maxQuota < 1) maxQuota = 1;
+
+  if (userVotesInCat >= maxQuota) {
+    return { status: 'error', message: 'Hak suara Anda (' + maxQuota + ' suara) untuk kategori ini sudah terpenuhi.' };
+  }
+
+  appendRowByHeaders(sheet, {
+    id_vote: idVote,
+    id_voter: idVoter,
+    voter_name: voterName,
+    id_team: idTeam,
+    id_kategori: idKategori,
+    timestamp: ts
+  });
+
+  return { status: 'success', message: 'Vote berhasil disimpan ke database Google Sheets!', id_vote: idVote };
+}
+
+function handleRemovePublicVote(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+  if (!sheet) return { status: 'error', message: 'Sheet Public_Votes belum tersedia' };
+
+  var idVote = String(data.id_vote || '').trim();
+  var idVoter = String(data.id_voter || '').trim();
+  var idTeam = String(data.id_team || '').trim();
+  var idKategori = String(data.id_kategori || '').trim();
+
+  var rows = sheet.getDataRange().getValues();
+  for (var r = rows.length - 1; r >= 1; r--) {
+    var rowVoteId = String(rows[r][0] || '').trim();
+    var rowVoter = String(rows[r][1] || '').trim();
+    var rowTeam = String(rows[r][3] || '').trim();
+    var rowCat = String(rows[r][4] || '').trim();
+
+    var matchVoteId = idVote && (rowVoteId === idVote);
+    var matchComposite = idVoter && idTeam && idKategori && (rowVoter === idVoter && rowTeam === idTeam && rowCat === idKategori);
+
+    if (matchVoteId || matchComposite) {
+      sheet.deleteRow(r + 1);
+      return { status: 'success', message: 'Suara berhasil dibatalkan dari database Google Sheets.' };
+    }
+  }
+  return { status: 'error', message: 'Data suara tidak ditemukan di database Google Sheets.' };
+}
+
+/**
+ * Pengelolaan Cabang Lomba (Categories) Termasuk Link Siaran Langsung (Live Streaming)
+ */
+function handleManageCategory(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  }
+
+  ensureHeaderExists(sheet, 'assigned_juries');
+  ensureHeaderExists(sheet, 'live_tiktok');
+  ensureHeaderExists(sheet, 'live_youtube');
+  ensureHeaderExists(sheet, 'live_instagram');
+  ensureHeaderExists(sheet, 'voting_start');
+  ensureHeaderExists(sheet, 'voting_end');
+
+  var op = data.operation || 'create';
+  var idKategori = String(data.id_kategori || ('cat-' + new Date().getTime())).trim();
+  var namaKategori = String(data.nama_kategori || '').trim();
+  var idEvent = String(data.id_event || '').trim();
+  var rows = sheet.getDataRange().getValues();
+
+  if (op === 'delete' || op === 'purge') {
+    var targetId = idKategori.toLowerCase();
+    var targetName = namaKategori.toLowerCase();
+    var deletedCount = 0;
+
+    for (var r = rows.length - 1; r >= 1; r--) {
+      var rowId = String(rows[r][0] || '').trim().toLowerCase();
+      var rowName = String(rows[r][2] || '').trim().toLowerCase();
+      var matchName = targetName && (rowName === targetName);
+      var matchId = targetId && (rowId === targetId);
+
+      if (matchName || (matchId && (!targetName || rowName === targetName))) {
+        sheet.deleteRow(r + 1);
+        deletedCount++;
+      }
+    }
+
+    if (deletedCount > 0) {
+      try {
+        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+        if (scoreSheet) {
+          var sRows = scoreSheet.getDataRange().getValues();
+          for (var s = sRows.length - 1; s >= 1; s--) {
+            var sCatId = String(sRows[s][4] || '').trim().toLowerCase();
+            if (sCatId === targetId) {
+              scoreSheet.deleteRow(s + 1);
+            }
+          }
+        }
+        var voteSheet = ss.getSheetByName(SHEETS.PUBLIC_VOTES);
+        if (voteSheet) {
+          var vRows = voteSheet.getDataRange().getValues();
+          for (var v = vRows.length - 1; v >= 1; v--) {
+            var vCatId = String(vRows[v][4] || '').trim().toLowerCase();
+            if (vCatId === targetId) {
+              voteSheet.deleteRow(v + 1);
+            }
+          }
+        }
+      } catch (cleanErr) {
+        Logger.log('Score/vote cleanup warning: ' + cleanErr);
+      }
+
+      return { status: 'success', message: 'Cabang lomba (' + (namaKategori || idKategori) + ') berhasil dihapus permanen dari Google Sheets.' };
+    }
+    return { status: 'error', message: 'Cabang lomba tidak ditemukan di sheet Categories Google Sheets.' };
+  }
+
+  var kriteriaStr = Array.isArray(data.kriteria) ? JSON.stringify(data.kriteria) : String(data.kriteria || '[]');
+  var assignedJuriesStr = Array.isArray(data.assigned_juries)
+    ? JSON.stringify(data.assigned_juries)
+    : String(data.assigned_juries || '[]');
+
+  var liveTiktok = String(data.live_tiktok || '').trim();
+  var liveYoutube = String(data.live_youtube || '').trim();
+  var liveInstagram = String(data.live_instagram || '').trim();
+  var votingStart = String(data.voting_start || '').trim();
+  var votingEnd = String(data.voting_end || '').trim();
+
+  var catObj = {
+    id_kategori: idKategori,
+    id_event: data.id_event || 'duta-camp-2026',
+    nama_kategori: data.nama_kategori || '',
+    tipe: data.tipe || 'Lomba',
+    assessment_type: data.assessment_type || 'all',
+    tipe_peserta: data.tipe_peserta || 'Group',
+    votes_required: parseInt(data.votes_required || 1, 10),
+    kriteria: kriteriaStr,
+    deskripsi: data.deskripsi || '',
+    assigned_juries: assignedJuriesStr,
+    live_tiktok: liveTiktok,
+    live_youtube: liveYoutube,
+    live_instagram: liveInstagram,
+    voting_start: votingStart,
+    voting_end: votingEnd
+  };
+
+  if (op === 'update') {
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]).trim().toLowerCase() === idKategori.toLowerCase()) {
+        updateRowByHeaders(sheet, i + 1, catObj);
+        return { status: 'success', message: 'Cabang lomba & link siaran langsung berhasil diperbarui di Google Sheets (Categories)!' };
+      }
+    }
+    if (namaKategori) {
+      for (var j = 1; j < rows.length; j++) {
+        var rEvent = String(rows[j][1] || '').trim().toLowerCase();
+        var rName = String(rows[j][2] || '').trim().toLowerCase();
+        if (rName === namaKategori.toLowerCase() && (!idEvent || rEvent === idEvent.toLowerCase())) {
+          updateRowByHeaders(sheet, j + 1, catObj);
+          return { status: 'success', message: 'Cabang lomba & link siaran langsung berhasil diperbarui di Google Sheets (Categories)!' };
+        }
+      }
+    }
+    return { status: 'error', message: 'Cabang lomba tidak ditemukan untuk diperbarui' };
+  }
+
+  for (var k = 1; k < rows.length; k++) {
+    var exId = String(rows[k][0] || '').trim().toLowerCase();
+    var exEvent = String(rows[k][1] || '').trim().toLowerCase();
+    var exName = String(rows[k][2] || '').trim().toLowerCase();
+
+    if ((exId === idKategori.toLowerCase()) || 
+        (namaKategori && exName === namaKategori.toLowerCase() && (!idEvent || exEvent === idEvent.toLowerCase()))) {
+      updateRowByHeaders(sheet, k + 1, catObj);
+      return { status: 'success', message: 'Cabang lomba sudah ada, data disinkronkan ke Google Sheets.' };
+    }
+  }
+
+  appendRowByHeaders(sheet, catObj);
+  return { status: 'success', message: 'Cabang lomba berhasil ditambahkan ke Google Sheets' };
+}
+
+/**
+ * Penyimpanan Cepat Link Siaran Langsung (TikTok, YouTube, Instagram) ke Sheet Categories
+ */
+function handleUpdateCategoryLiveLinks(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  }
+
+  ensureHeaderExists(sheet, 'live_tiktok');
+  ensureHeaderExists(sheet, 'live_youtube');
+  ensureHeaderExists(sheet, 'live_instagram');
+
+  var idKategori = String(data.id_kategori || '').trim();
+  var namaKategori = String(data.nama_kategori || '').trim();
+  var liveTiktok = String(data.live_tiktok || '').trim();
+  var liveYoutube = String(data.live_youtube || '').trim();
+  var liveInstagram = String(data.live_instagram || '').trim();
+
+  if (!idKategori && !namaKategori) {
+    return { status: 'error', message: 'ID atau Nama Cabang Lomba tidak disertakan' };
+  }
+
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) {
+    return { status: 'error', message: 'Data kategori di spreadsheet masih kosong' };
+  }
+
+  var headers = rows[0];
+  var tiktokCol = headers.indexOf('live_tiktok');
+  var youtubeCol = headers.indexOf('live_youtube');
+  var instagramCol = headers.indexOf('live_instagram');
+
+  if (tiktokCol === -1) tiktokCol = 10;
+  if (youtubeCol === -1) youtubeCol = 11;
+  if (instagramCol === -1) instagramCol = 12;
+
+  var found = false;
+  for (var r = 1; r < rows.length; r++) {
+    var rowId = String(rows[r][0] || '').trim().toLowerCase();
+    var rowName = String(rows[r][2] || '').trim().toLowerCase();
+
+    if ((idKategori && rowId === idKategori.toLowerCase()) || (namaKategori && rowName === namaKategori.toLowerCase())) {
+      sheet.getRange(r + 1, tiktokCol + 1).setValue(liveTiktok);
+      sheet.getRange(r + 1, youtubeCol + 1).setValue(liveYoutube);
+      sheet.getRange(r + 1, instagramCol + 1).setValue(liveInstagram);
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    return { status: 'error', message: 'Cabang lomba tidak ditemukan di sheet Categories' };
+  }
+
+  return {
+    status: 'success',
+    message: 'Link live streaming berhasil disimpan ke sheet Categories Google Sheets!',
+    id_kategori: idKategori,
+    live_tiktok: liveTiktok,
+    live_youtube: liveYoutube,
+    live_instagram: liveInstagram
+  };
+}
+
+function handleManageTeam(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.TEAMS);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.TEAMS);
+  }
+
+  ensureHeaderExists(sheet, 'ketua_regu');
+  ensureHeaderExists(sheet, 'motto');
+  ensureHeaderExists(sheet, 'tipe_partisipasi');
+
+  var op = data.operation || 'create';
+  var idTeam = String(data.id_team || ('team-' + new Date().getTime()));
+  var rows = sheet.getDataRange().getValues();
+
+  if (op === 'delete') {
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]) === idTeam) {
+        sheet.deleteRow(r + 1);
+        return { status: 'success', message: 'Peserta berhasil dihapus' };
+      }
+    }
+    return { status: 'error', message: 'Peserta tidak ditemukan' };
+  }
+
+  var anggotaStr = Array.isArray(data.anggota) ? JSON.stringify(data.anggota) : String(data.anggota || '[]');
+  var teamObj = {
+    id_team: idTeam,
+    id_event: data.id_event || 'duta-camp-2026',
+    nama_regu: data.nama_regu || '',
+    kelas_pangkalan: data.kelas_pangkalan || '',
+    kategori_regu: data.kategori_regu || 'Putra',
+    foto_url: data.foto_url || '',
+    anggota: anggotaStr,
+    ketua_regu: data.ketua_regu || '',
+    motto: data.motto || '',
+    tipe_partisipasi: data.tipe_partisipasi || 'Group'
+  };
+
+  if (op === 'update') {
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === idTeam) {
+        updateRowByHeaders(sheet, i + 1, teamObj);
+        return { status: 'success', message: 'Data peserta berhasil diperbarui' };
+      }
+    }
+  }
+
+  appendRowByHeaders(sheet, teamObj);
+  return { status: 'success', message: 'Peserta berhasil ditambahkan' };
+}
+
+function handleManageJury(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.USERS);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.USERS);
+  }
+
+  var op = data.operation || 'create';
+  var rows = sheet.getDataRange().getValues();
+
+  function norm(str) {
+    if (!str) return '';
+    return String(str).trim().toLowerCase().replace(/^@+/, '');
+  }
+
+  var targetId = norm(data.id || data.id_jury);
+  var targetUser = norm(data.username);
+  var targetName = norm(data.nama);
+
+  if (op === 'delete') {
+    var deleted = false;
+    var deletedUsernames = [];
+    var deletedIds = [];
+
+    for (var r = rows.length - 1; r >= 1; r--) {
+      var rowId = norm(rows[r][0]);
+      var rowUsername = norm(rows[r][1]);
+      var rowName = norm(rows[r][3]);
+
+      var idMatch = targetId && (
+        rowId === targetId ||
+        rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, '')
+      );
+      var userMatch = targetUser && (
+        rowUsername === targetUser ||
+        rowUsername === targetId.replace(/^(user|jury)-/, '') ||
+        rowId.replace(/^(user|jury)-/, '') === targetUser
+      );
+      var crossMatch = (targetId && (rowUsername === targetId || rowUsername === targetId.replace(/^(user|jury)-/, ''))) ||
+                       (targetUser && (rowId === targetUser || rowId.replace(/^(user|jury)-/, '') === targetUser));
+      var nameMatch = targetName && (rowName === targetName);
+
+      if (idMatch || userMatch || crossMatch || nameMatch) {
+        if (rowUsername) deletedUsernames.push(rowUsername);
+        if (rowId) deletedIds.push(rowId);
+        sheet.deleteRow(r + 1);
+        deleted = true;
+      }
+    }
+
+    if (deleted) {
+      try {
+        var scoreSheet = ss.getSheetByName(SHEETS.JURY_SCORES);
+        if (scoreSheet) {
+          var sRows = scoreSheet.getDataRange().getValues();
+          for (var s = sRows.length - 1; s >= 1; s--) {
+            var sJuryId = norm(sRows[s][1]);
+            var sJuryName = norm(sRows[s][2]);
+            if ((targetId && sJuryId === targetId) ||
+                (targetUser && sJuryId === targetUser) ||
+                (targetName && sJuryName === targetName) ||
+                deletedIds.indexOf(sJuryId) >= 0 ||
+                deletedUsernames.indexOf(sJuryId) >= 0) {
+              scoreSheet.deleteRow(s + 1);
+            }
+          }
+        }
+      } catch (scoreErr) {
+        Logger.log('Error cleaning jury scores: ' + scoreErr);
+      }
+      return { status: 'success', message: 'Akun juri berhasil dihapus permanen dari Google Sheets' };
+    }
+    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets' };
+  }
+
+  if (op === 'update') {
+    for (var i = 1; i < rows.length; i++) {
+      var rowId = norm(rows[i][0]);
+      var rowUsername = norm(rows[i][1]);
+      var rowName = norm(rows[i][3]);
+
+      var isMatch = (targetId && (rowId === targetId || rowId.replace(/^(user|jury)-/, '') === targetId.replace(/^(user|jury)-/, ''))) ||
+                    (targetUser && (rowUsername === targetUser || rowUsername === targetId.replace(/^(user|jury)-/, '') || rowId.replace(/^(user|jury)-/, '') === targetUser)) ||
+                    (targetName && rowName === targetName);
+
+      if (isMatch) {
+        var updateObj = {
+          username: targetUser,
+          nama: String(data.nama || ''),
+          jurySpecialty: String(data.jurySpecialty || '')
+        };
+        if (data.password) updateObj.password = String(data.password);
+        updateRowByHeaders(sheet, i + 1, updateObj);
+        return { status: 'success', message: 'Data juri berhasil diperbarui di Google Sheets' };
+      }
+    }
+    return { status: 'error', message: 'Akun juri tidak ditemukan di Google Sheets' };
+  }
+
+  for (var u = 1; u < rows.length; u++) {
+    var existingUser = norm(rows[u][1]);
+    if (existingUser === targetUser) {
+      return { status: 'error', message: 'Username ' + targetUser + ' sudah digunakan di database Google Sheets' };
+    }
+  }
+
+  var newId = String(data.id || data.id_jury || ('jury-' + new Date().getTime()));
+  appendRowByHeaders(sheet, {
+    id: newId,
+    username: targetUser,
+    password: String(data.password || '123456'),
+    nama: String(data.nama || ''),
+    role: 'juri',
+    emailOrWa: '',
+    jurySpecialty: String(data.jurySpecialty || 'Dewan Juri Khusus'),
+    created_at: String(data.created_at || new Date().toISOString())
+  });
+
+  return { status: 'success', message: 'Akun juri berhasil dibuat di Google Sheets', id: newId };
+}
+
+function handleManageEvent(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.EVENTS);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.EVENTS);
+  }
+
+  var idEvent = data.id_event || ('event-' + new Date().getTime());
+  var op = data.operation || 'create';
+  var rows = sheet.getDataRange().getValues();
+
+  var eventObj = {
+    id_event: idEvent,
+    kode_event: data.kode_event || '',
+    nama_event: data.nama_event,
+    tahun: data.tahun || '2026',
+    status_aktif: data.status_aktif !== undefined ? data.status_aktif : true,
+    batas_waktu: data.batas_waktu || '',
+    deskripsi: data.deskripsi || ''
+  };
+
+  if (op === 'update') {
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === idEvent) {
+        updateRowByHeaders(sheet, i + 1, eventObj);
+        return { status: 'success', message: 'Event berhasil diperbarui' };
+      }
+    }
+  }
+
+  appendRowByHeaders(sheet, eventObj);
+  return { status: 'success', message: 'Event berhasil ditambahkan' };
+}
+
+function handleToggleEventStatus(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.EVENTS);
+  if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };
+  var headers = rows[0];
+  var statusColIdx = -1;
+  var tahunColIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c]).trim().toLowerCase();
+    if (h === 'status_aktif') statusColIdx = c + 1;
+    if (h === 'tahun') tahunColIdx = c + 1;
+  }
+  var updated = false;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {
+      var isAct = (data.is_active === true || String(data.is_active).toLowerCase() === 'true');
+      if (statusColIdx > 0) sheet.getRange(i + 1, statusColIdx).setValue(isAct);
+      if (tahunColIdx > 0 && typeof rows[i][tahunColIdx - 1] === 'boolean') {
+        sheet.getRange(i + 1, tahunColIdx).setValue(isAct);
+      }
+      sheet.getRange(i + 1, 3).setValue(isAct);
+      sheet.getRange(i + 1, 5).setValue(isAct);
+      updated = true;
+    }
+  }
+  if (updated) {
+    return { status: 'success', message: 'Status event berhasil diubah' };
+  }
+  return { status: 'error', message: 'Event tidak ditemukan' };
+}
+
+function handleUpdateEventDeadline(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.EVENTS);
+  if (!sheet) return { status: 'error', message: 'Sheet Events belum tersedia' };
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return { status: 'error', message: 'Tidak ada data event' };
+  var headers = rows[0];
+  var deadlineColIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c]).trim().toLowerCase();
+    if (h === 'batas_waktu') deadlineColIdx = c + 1;
+  }
+  var updated = false;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === String(data.id_event).trim()) {
+      if (deadlineColIdx > 0) {
+        sheet.getRange(i + 1, deadlineColIdx).setValue(data.deadline || '');
+      } else {
+        sheet.getRange(i + 1, 6).setValue(data.deadline || '');
+      }
+      updated = true;
+    }
+  }
+  if (updated) {
+    return { status: 'success', message: 'Batas waktu berhasil disimpan' };
+  }
+  return { status: 'error', message: 'Event tidak ditemukan' };
+}
+
+function getSheetDataAsObjects(sheet) {
+  if (!sheet) return [];
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) return [];
+  var headers = rows[0];
+  var results = [];
+  var isCatSheet = (sheet.getName() === (SHEETS.CATEGORIES || 'Categories'));
+
+  for (var r = 1; r < rows.length; r++) {
+    var row = rows[r];
+    var obj = {};
+    for (var c = 0; c < headers.length; c++) {
+      var hName = String(headers[c]).trim();
+      if (hName) {
+        obj[hName] = row[c];
+      }
+    }
+    // Jika sheet Categories memiliki data di kolom K (indeks 10), L (indeks 11), M (indeks 12)
+    // namun kolom header di row 1 belum bernama:
+    if (isCatSheet) {
+      if (obj.live_tiktok === undefined && row.length > 10) obj.live_tiktok = row[10];
+      if (obj.live_youtube === undefined && row.length > 11) obj.live_youtube = row[11];
+      if (obj.live_instagram === undefined && row.length > 12) obj.live_instagram = row[12];
+    }
+    results.push(obj);
+  }
+  return results;
+}
+
+function handleUpdateCategoryCriteria(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  if (!sheet) {
+    setupDatabaseSheets();
+    sheet = ss.getSheetByName(SHEETS.CATEGORIES);
+  }
+
+  var idKategori = String(data.id_kategori || '').trim();
+  if (!idKategori) {
+    return { status: 'error', message: 'ID Kategori tidak disertakan' };
+  }
+
+  ensureHeaderExists(sheet, 'kriteria');
+  var rows = sheet.getDataRange().getValues();
+  if (rows.length <= 1) {
+    return { status: 'error', message: 'Data kategori di spreadsheet masih kosong' };
+  }
+
+  var headers = rows[0];
+  var idCol = headers.indexOf('id_kategori');
+  var kriteriaCol = headers.indexOf('kriteria');
+  if (idCol === -1) idCol = 0;
+  if (kriteriaCol === -1) kriteriaCol = 7;
+
+  var kriteriaStr = Array.isArray(data.kriteria)
+    ? JSON.stringify(data.kriteria)
+    : String(data.kriteria || '[]');
+
+  var found = false;
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][idCol]).trim() === idKategori) {
+      sheet.getRange(r + 1, kriteriaCol + 1).setValue(kriteriaStr);
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    return { status: 'error', message: 'Cabang lomba dengan ID ' + idKategori + ' tidak ditemukan di sheet Categories' };
+  }
+
+  return {
+    status: 'success',
+    message: 'Kriteria pertanyaan dewan juri berhasil disimpan permanen ke Google Sheets!',
+    id_kategori: idKategori,
+    kriteria: data.kriteria
+  };
+}
+
+function authorizeDriveApp() {
+  try {
+    var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+    var testFile = folder.createFile('auth_test.txt', 'Otorisasi Google Drive Berhasil');
+    testFile.setTrashed(true);
+    Logger.log('Otorisasi Google Drive Berhasil Penuh! Hak tulis aktif di folder: ' + folder.getName());
+    return 'Otorisasi Berhasil Penuh: ' + folder.getName();
+  } catch (e) {
+    Logger.log('Error otorisasi Drive: ' + e);
+    throw e;
+  }
+}
+
+function handleUploadLogoToDrive(data) {
+  try {
+    var targetFolderId = String(data.folderId || DRIVE_FOLDER_ID).trim();
+    if (!targetFolderId) {
+      targetFolderId = DRIVE_FOLDER_ID;
+    }
+
+    var folder = null;
+    try {
+      folder = DriveApp.getFolderById(targetFolderId);
+    } catch (err1) {
+      return {
+        status: 'error',
+        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak dapat diakses: ' + err1.toString()
+      };
+    }
+
+    if (!folder) {
+      return {
+        status: 'error',
+        message: 'Folder Google Drive (ID: ' + targetFolderId + ') tidak ditemukan.'
+      };
+    }
+
+    var base64Data = data.base64 || data.base64Data || '';
+    if (base64Data.indexOf(';base64,') > -1) {
+      base64Data = base64Data.split(';base64,')[1];
+    }
+
+    if (!base64Data) {
+      return { status: 'error', message: 'Data gambar base64 kosong' };
+    }
+
+    var mimeType = data.mimeType || 'image/png';
+    var logoTitle = String(data.logoTitle || data.name || '').trim();
+    var ext = '.png';
+    if (mimeType.indexOf('jpeg') > -1 || mimeType.indexOf('jpg') > -1) {
+      ext = '.jpg';
+    } else if (mimeType.indexOf('svg') > -1) {
+      ext = '.svg';
+    } else if (mimeType.indexOf('webp') > -1) {
+      ext = '.webp';
+    }
+
+    var fileName = '';
+    if (logoTitle) {
+      var safeTitle = logoTitle.replace(/[\\\\/:*?\"<>|]/g, ' ').trim();
+      fileName = safeTitle + ext;
+    } else if (data.fileName) {
+      fileName = data.fileName;
+    } else {
+      fileName = 'logo_' + new Date().getTime() + ext;
+    }
+
+    var decodedBytes = Utilities.base64Decode(base64Data);
+    var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
+    var file = folder.createFile(blob);
+
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (shareErr) {}
+
+    var fileId = file.getId();
+    var directViewUrl = 'https://lh3.googleusercontent.com/d/' + fileId;
+    var downloadUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+
+    var logoEntry = {
+      id: 'logo_' + fileId,
+      name: logoTitle || fileName.replace(/\\.[^/.]+$/, ""),
+      url: directViewUrl,
+      driveFileId: fileId,
+      fileName: file.getName(),
+      folderId: folder.getId(),
+      folderName: folder.getName(),
+      type: data.type || 'olahraga',
+      created_at: new Date().toISOString()
+    };
+
+    saveUploadedLogoToConfig(logoEntry);
+
+    return {
+      status: 'success',
+      fileId: fileId,
+      fileUrl: directViewUrl,
+      downloadUrl: downloadUrl,
+      fileName: file.getName(),
+      folderName: folder.getName(),
+      folderId: folder.getId(),
+      logoEntry: logoEntry,
+      message: 'Logo \"' + logoEntry.name + '\" berhasil diunggah ke Google Drive!'
+    };
+  } catch (err) {
+    return { status: 'error', message: 'Gagal mengunggah logo ke Google Drive: ' + err.toString() };
+  }
+}
+
+function getLogosFromDriveFolder(folderId) {
+  var targetId = String(folderId || DRIVE_FOLDER_ID).trim();
+  if (!targetId) targetId = DRIVE_FOLDER_ID;
+  var logos = [];
+  try {
+    var folder = DriveApp.getFolderById(targetId);
+    if (!folder) return logos;
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var file = files.next();
+      var name = file.getName();
+      if (name === 'auth_test.txt') continue;
+      var mime = String(file.getMimeType() || '').toLowerCase();
+      if (mime.indexOf('image/') === 0 || /\\.(png|jpe?g|svg|webp|gif|bmp)$/i.test(name)) {
+        var fileId = file.getId();
+        try {
+          file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {}
+        var cleanTitle = name.replace(/\\.[^/.]+$/, "");
+        logos.push({
+          id: 'logo_' + fileId,
+          name: cleanTitle,
+          url: 'https://lh3.googleusercontent.com/d/' + fileId,
+          driveFileId: fileId,
+          fileName: name,
+          folderId: folder.getId(),
+          folderName: folder.getName(),
+          type: 'olahraga',
+          created_at: file.getDateCreated() ? file.getDateCreated().toISOString() : new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    Logger.log('getLogosFromDriveFolder error: ' + err);
+  }
+  return logos;
+}
+
+function syncAndGetDriveLogos(folderId) {
+  var driveLogos = getLogosFromDriveFolder(folderId);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  var existingList = [];
+  if (sheet) {
+    var rows = sheet.getDataRange().getValues();
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        try {
+          existingList = JSON.parse(rows[r][1]);
+          if (!Array.isArray(existingList)) existingList = [];
+        } catch (e) {
+          existingList = [];
+        }
+        break;
+      }
+    }
+  }
+
+  var mergedMap = {};
+  for (var d = 0; d < driveLogos.length; d++) {
+    var dl = driveLogos[d];
+    mergedMap[dl.driveFileId] = dl;
+  }
+  for (var ex = 0; ex < existingList.length; ex++) {
+    var itm = existingList[ex];
+    if (itm && (itm.driveFileId || itm.id)) {
+      var k = itm.driveFileId || itm.id;
+      if (mergedMap[k]) {
+        mergedMap[k] = Object.assign({}, mergedMap[k], itm);
+      } else if (itm.url) {
+        mergedMap[k] = itm;
+      }
+    }
+  }
+
+  var finalList = [];
+  for (var mk in mergedMap) {
+    finalList.push(mergedMap[mk]);
+  }
+
+  if (finalList.length > 0) {
+    saveUploadedLogoListToConfig(finalList);
+  }
+
+  return finalList;
+}
+
+function saveUploadedLogoListToConfig(list) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+      sheet.appendRow(['key', 'value', 'updated_at']);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+    }
+    var rows = sheet.getDataRange().getValues();
+    var rowIndex = -1;
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        rowIndex = r + 1;
+        break;
+      }
+    }
+    var valStr = JSON.stringify(list);
+    var ts = new Date().toISOString();
+    if (rowIndex > -1) {
+      sheet.getRange(rowIndex, 2).setValue(valStr);
+      sheet.getRange(rowIndex, 3).setValue(ts);
+    } else {
+      sheet.appendRow(['uploaded_logos', valStr, ts]);
+    }
+  } catch (err) {
+    Logger.log('Gagal menyimpan uploaded_logos: ' + err);
+  }
+}
+
+function saveUploadedLogoToConfig(logoEntry) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+      sheet.appendRow(['key', 'value', 'updated_at']);
+      sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+    }
+
+    var currentList = [];
+    var rows = sheet.getDataRange().getValues();
+    var rowIndex = -1;
+    for (var r = 1; r < rows.length; r++) {
+      if (String(rows[r][0]).trim() === 'uploaded_logos') {
+        rowIndex = r + 1;
+        try {
+          currentList = JSON.parse(rows[r][1]);
+          if (!Array.isArray(currentList)) currentList = [];
+        } catch (e) {
+          currentList = [];
+        }
+        break;
+      }
+    }
+
+    var existingIdx = -1;
+    for (var i = 0; i < currentList.length; i++) {
+      if (currentList[i].driveFileId === logoEntry.driveFileId || currentList[i].name === logoEntry.name) {
+        existingIdx = i;
+        break;
+      }
+    }
+
+    if (existingIdx > -1) {
+      currentList[existingIdx] = logoEntry;
+    } else {
+      currentList.unshift(logoEntry);
+    }
+
+    var ts = new Date().toISOString();
+    var valStr = JSON.stringify(currentList);
+
+    if (rowIndex > -1) {
+      sheet.getRange(rowIndex, 2).setValue(valStr);
+      sheet.getRange(rowIndex, 3).setValue(ts);
+    } else {
+      sheet.appendRow(['uploaded_logos', valStr, ts]);
+    }
+  } catch (err) {
+    Logger.log('Gagal menyimpan logo ke Config sheet: ' + err);
+  }
+}
+
+function handleSaveConfig(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.CONFIG || 'Config');
+    sheet.appendRow(['key', 'value', 'updated_at']);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#064e3b').setFontColor('#ffffff');
+  }
+
+  var key = String(data.key || '').trim();
+  var value = typeof data.value === 'object' ? JSON.stringify(data.value) : String(data.value || '');
+  var ts = new Date().toISOString();
+
+  if (!key) return { status: 'error', message: 'Key config tidak boleh kosong' };
+
+  var rows = sheet.getDataRange().getValues();
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][0]).trim() === key) {
+      sheet.getRange(r + 1, 2).setValue(value);
+      sheet.getRange(r + 1, 3).setValue(ts);
+      return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil diperbarui di Google Sheets.' };
+    }
+  }
+
+  sheet.appendRow([key, value, ts]);
+  return { status: 'success', message: 'Konfigurasi ' + key + ' berhasil disimpan di Google Sheets.' };
+}
+
+function handleGetConfig(key) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEETS.CONFIG || 'Config');
+  if (!sheet) return { status: 'error', message: 'Sheet Config belum tersedia' };
+  var rows = sheet.getDataRange().getValues();
+  for (var r = 1; r < rows.length; r++) {
+    if (String(rows[r][0]).trim() === String(key).trim()) {
+      var val = rows[r][1];
+      try {
+        val = JSON.parse(val);
+      } catch (e) {}
+      return { status: 'success', key: key, value: val };
+    }
+  }
+  return { status: 'error', message: 'Key config tidak ditemukan' };
+}
+
+function getConfigsMap(sheet) {
+  var map = {};
+  if (!sheet) return map;
+  try {
+    var rows = sheet.getDataRange().getValues();
+    for (var r = 1; r < rows.length; r++) {
+      var key = String(rows[r][0] || '').trim();
+      var val = rows[r][1];
+      if (key) {
+        try {
+          map[key] = JSON.parse(val);
+        } catch (e) {
+          map[key] = val;
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('Error getConfigsMap: ' + e);
+  }
+  return map;
+}
+`;

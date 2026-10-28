@@ -92,7 +92,7 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
   const schemas = [
     { name: 'Users', columns: ['id', 'username', 'password', 'nama', 'role', 'emailOrWa', 'jurySpecialty', 'created_at'] },
     { name: 'Events', columns: ['id_event', 'kode_event', 'nama_event', 'tahun', 'status_aktif', 'batas_waktu', 'deskripsi'] },
-    { name: 'Categories', columns: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi'] },
+    { name: 'Categories', columns: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi', 'assigned_juries', 'live_tiktok', 'live_youtube', 'live_instagram'] },
     { name: 'Teams', columns: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota'] },
     { name: 'Jury_Scores', columns: ['id_score', 'id_jury', 'jury_name', 'id_team', 'id_kategori', 'skor_1_to_5', 'catatan', 'kriteria_scores', 'is_final', 'timestamp'] },
     { name: 'Public_Votes', columns: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp'] },

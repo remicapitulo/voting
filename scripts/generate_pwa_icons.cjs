@@ -2,8 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
+const logoPath = path.resolve(__dirname, '../public/assets/aistudio/Logo_SMPIPD_Baru_2017_fav_ico_a861b17a.png');
+const logoBase64 = fs.readFileSync(logoPath).toString('base64');
+
 // 1. Trophy SVG for general icon (with rounded corners for preview / SVG)
-const trophySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+const trophySvg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <linearGradient id="emeraldBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#064e3b" />
@@ -55,8 +58,8 @@ const trophySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"
     <!-- Cup Highlight Left Side -->
     <path d="M180 150 C180 150 185 250 250 280 C230 260 200 230 195 150 Z" fill="url(#goldHighlight)" />
 
-    <!-- Cup Center Star / Emblem -->
-    <path d="M256 182 L263 204 H286 L267 218 L274 240 L256 226 L238 240 L245 218 L226 204 H249 Z" fill="#ffffff" fill-opacity="0.9" />
+    <!-- Cup Center School Logo (Replacing star, unedited official logo) -->
+    <image href="data:image/png;base64,${logoBase64}" xlink:href="data:image/png;base64,${logoBase64}" x="214" y="168" width="84" height="86" preserveAspectRatio="xMidYMid meet" />
 
     <!-- Trophy Neck / Stem -->
     <path d="M242 292 H270 V325 H242 Z" fill="url(#darkGold)" />

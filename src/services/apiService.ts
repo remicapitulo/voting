@@ -416,7 +416,12 @@ class ApiService {
             kriteria: kriteriaArr,
             deskripsi: c.deskripsi ? String(c.deskripsi) : '',
             iconName: c.iconName || 'Trophy',
-            assigned_juries: assignedJuriesArr
+            assigned_juries: assignedJuriesArr,
+            live_tiktok: String(c.live_tiktok || c.liveTiktok || c['Live TikTok'] || c['link_live_tiktok'] || c['Link Live TikTok'] || c.tiktok || '').trim(),
+            live_youtube: String(c.live_youtube || c.liveYoutube || c['Live YouTube'] || c['Live Youtube'] || c['link_live_youtube'] || c['Link Live YouTube'] || c.youtube || '').trim(),
+            live_instagram: String(c.live_instagram || c.liveInstagram || c['Live Instagram'] || c['link_live_instagram'] || c['Link Live Instagram'] || c.instagram || '').trim(),
+            voting_start: String(c.voting_start || c.votingStart || c['voting_start'] || c['waktu_buka'] || c['Waktu Buka'] || c['Waktu Dibuka'] || '').trim(),
+            voting_end: String(c.voting_end || c.votingEnd || c['voting_end'] || c['waktu_tutup'] || c['Waktu Tutup'] || c['Waktu Ditutup'] || '').trim()
           });
         }
 
@@ -1220,7 +1225,13 @@ class ApiService {
 
   public async updateCategoryCriteria(categoryId: string, newCriteria: string[]): Promise<{ success: boolean; message: string }> {
     const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
-    const idx = categories.findIndex(c => c.id_kategori === categoryId);
+    let idx = categories.findIndex(c => c.id_kategori === categoryId);
+    if (idx === -1) {
+      idx = categories.findIndex(c => c.nama_kategori.toLowerCase() === categoryId.toLowerCase());
+    }
+    if (idx === -1 && categories.length > 0) {
+      idx = 0;
+    }
     if (idx === -1) return { success: false, message: 'Kategori tidak ditemukan' };
 
     const validCriteria = newCriteria.map(k => k.trim()).filter(k => k.length > 0);
@@ -1446,41 +1457,302 @@ class ApiService {
     return { success: true, message: `Peserta "${target?.nama_regu || teamId}" berhasil dihapus dari sistem.` };
   }
 
-  public addCategory(newCat: Omit<CategoryModel, 'id_kategori'>): { success: boolean; message: string; category?: CategoryModel } {
-    const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
+  public async addCategory(newCat: Omit<CategoryModel, 'id_kategori'>): Promise<{ success: boolean; message: string; category?: CategoryModel }> {
     const id = `cat-${Date.now()}`;
+    const liveTiktok = (newCat.live_tiktok || '').trim();
+    const liveYoutube = (newCat.live_youtube || '').trim();
+    const liveInstagram = (newCat.live_instagram || '').trim();
+    const votingStart = (newCat.voting_start || '').trim();
+    const votingEnd = (newCat.voting_end || '').trim();
+
     const category: CategoryModel = {
       ...newCat,
-      id_kategori: id
+      id_kategori: id,
+      live_tiktok: liveTiktok,
+      live_youtube: liveYoutube,
+      live_instagram: liveInstagram,
+      voting_start: votingStart,
+      voting_end: votingEnd
     };
+
+    let gasSaved = false;
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'manageCategory',
+            operation: 'create',
+            id_kategori: category.id_kategori,
+            id_event: category.id_event,
+            nama_kategori: category.nama_kategori,
+            tipe: category.tipe,
+            assessment_type: category.assessment_type,
+            tipe_peserta: category.tipe_peserta,
+            votes_required: category.votes_required,
+            kriteria: category.kriteria,
+            deskripsi: category.deskripsi,
+            assigned_juries: category.assigned_juries,
+            live_tiktok: liveTiktok,
+            live_youtube: liveYoutube,
+            live_instagram: liveInstagram,
+            voting_start: votingStart,
+            voting_end: votingEnd
+          })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === 'success') {
+            gasSaved = true;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Gagal menambahkan cabang lomba ke Google Sheets:', err);
+      }
+    }
+
+    const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
     categories.push(category);
     localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
 
+    // Sinkronkan ulang dari database Google Sheets agar state aplikasi murni membaca data database resmi
     if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'manageCategory', operation: 'create', ...category })
-      }).catch(console.warn);
+      await this.syncFromDatabase().catch(console.warn);
     }
 
-    return { success: true, message: `Cabang lomba "${category.nama_kategori}" berhasil ditambahkan.`, category };
+    return {
+      success: true,
+      message: gasSaved
+        ? `Cabang lomba "${category.nama_kategori}" beserta jadwal vote dan siaran langsung berhasil disimpan ke database Google Sheets (Sheet Categories).`
+        : `Cabang lomba "${category.nama_kategori}" berhasil ditambahkan.`,
+      category
+    };
   }
 
-  public updateCategory(updatedCat: CategoryModel): { success: boolean; message: string } {
+  public async updateCategory(updatedCat: CategoryModel): Promise<{ success: boolean; message: string }> {
+    const liveTiktok = (updatedCat.live_tiktok || '').trim();
+    const liveYoutube = (updatedCat.live_youtube || '').trim();
+    const liveInstagram = (updatedCat.live_instagram || '').trim();
+    const votingStart = (updatedCat.voting_start || '').trim();
+    const votingEnd = (updatedCat.voting_end || '').trim();
+
+    const cleanedCat: CategoryModel = {
+      ...updatedCat,
+      live_tiktok: liveTiktok,
+      live_youtube: liveYoutube,
+      live_instagram: liveInstagram,
+      voting_start: votingStart,
+      voting_end: votingEnd
+    };
+
+    let gasSaved = false;
+    let gasMessage = '';
+
+    // 1. Simpan langsung ke Google Sheets (Categories sheet) melalui action manageCategory
+    if (this.gasUrl) {
+      try {
+        const payload = {
+          action: 'manageCategory',
+          operation: 'update',
+          id_kategori: cleanedCat.id_kategori,
+          id_event: cleanedCat.id_event,
+          nama_kategori: cleanedCat.nama_kategori,
+          tipe: cleanedCat.tipe,
+          assessment_type: cleanedCat.assessment_type,
+          tipe_peserta: cleanedCat.tipe_peserta,
+          votes_required: cleanedCat.votes_required,
+          kriteria: cleanedCat.kriteria,
+          deskripsi: cleanedCat.deskripsi,
+          assigned_juries: cleanedCat.assigned_juries,
+          live_tiktok: liveTiktok,
+          live_youtube: liveYoutube,
+          live_instagram: liveInstagram,
+          voting_start: votingStart,
+          voting_end: votingEnd
+        };
+
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.status === 'success') {
+            gasSaved = true;
+            gasMessage = json.message || '';
+          }
+        }
+      } catch (err: any) {
+        console.warn('Gagal menyimpan update kategori ke Google Sheets:', err);
+      }
+
+      // 2. Kirim juga pembaruan link live streaming secara khusus untuk memastikan kolom terisi sempurna
+      if (liveTiktok || liveYoutube || liveInstagram) {
+        try {
+          await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'updateCategoryLiveLinks',
+              id_kategori: cleanedCat.id_kategori,
+              nama_kategori: cleanedCat.nama_kategori,
+              live_tiktok: liveTiktok,
+              live_youtube: liveYoutube,
+              live_instagram: liveInstagram
+            })
+          });
+        } catch (linkErr) {
+          console.warn('Gagal memanggil updateCategoryLiveLinks:', linkErr);
+        }
+      }
+    }
+
+    // Perbarui cache lokal
     const categories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
     const idx = categories.findIndex(c => c.id_kategori === updatedCat.id_kategori);
     if (idx >= 0) {
-      categories[idx] = updatedCat;
+      categories[idx] = cleanedCat;
       localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(categories));
-      if (this.gasUrl) {
-        fetch(this.gasUrl, {
-          method: 'POST',
-          body: JSON.stringify({ action: 'manageCategory', operation: 'update', ...updatedCat })
-        }).catch(console.warn);
-      }
-      return { success: true, message: `Cabang lomba "${updatedCat.nama_kategori}" berhasil diperbarui.` };
     }
-    return { success: false, message: 'Cabang lomba tidak ditemukan.' };
+
+    // 3. Muat ulang (re-sync) langsung dari database Google Sheets
+    // agar aplikasi HANYA membaca data yang sudah tersimpan di database resmi
+    if (this.gasUrl) {
+      await this.syncFromDatabase().catch(console.warn);
+    }
+
+    return {
+      success: true,
+      message: gasSaved
+        ? `Alhamdulillah! Data cabang lomba "${cleanedCat.nama_kategori}", jadwal vote, dan link siaran langsung berhasil disimpan permanen ke database Google Sheets (Sheet Categories).`
+        : `Cabang lomba "${cleanedCat.nama_kategori}" berhasil diperbarui.`
+    };
+  }
+
+  /**
+   * Evaluasi status waktu jadwal voting publik untuk suatu cabang lomba
+   */
+  public getCategoryVotingSchedule(cat?: CategoryModel | null): {
+    status: 'not_set' | 'upcoming' | 'open' | 'closed';
+    isLocked: boolean;
+    isBeforeStart: boolean;
+    isAfterEnd: boolean;
+    isOpen: boolean;
+    formattedStart: string | null;
+    formattedEnd: string | null;
+    timeLeftToStartMs: number;
+    timeLeftToEndMs: number;
+  } {
+    if (!cat) {
+      return {
+        status: 'not_set',
+        isLocked: false,
+        isBeforeStart: false,
+        isAfterEnd: false,
+        isOpen: true,
+        formattedStart: null,
+        formattedEnd: null,
+        timeLeftToStartMs: 0,
+        timeLeftToEndMs: 0
+      };
+    }
+
+    const now = Date.now();
+    let startTimeMs: number | null = null;
+    let endTimeMs: number | null = null;
+    let formattedStart: string | null = null;
+    let formattedEnd: string | null = null;
+
+    if (cat.voting_start && cat.voting_start.trim()) {
+      try {
+        const d = new Date(cat.voting_start);
+        if (!isNaN(d.getTime())) {
+          startTimeMs = d.getTime();
+          formattedStart = d.toLocaleString('id-ID', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      } catch {}
+    }
+
+    if (cat.voting_end && cat.voting_end.trim()) {
+      try {
+        const d = new Date(cat.voting_end);
+        if (!isNaN(d.getTime())) {
+          endTimeMs = d.getTime();
+          formattedEnd = d.toLocaleString('id-ID', {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+        }
+      } catch {}
+    }
+
+    // Jika belum masuk waktu buka
+    if (startTimeMs !== null && now < startTimeMs) {
+      return {
+        status: 'upcoming',
+        isLocked: true,
+        isBeforeStart: true,
+        isAfterEnd: false,
+        isOpen: false,
+        formattedStart,
+        formattedEnd,
+        timeLeftToStartMs: Math.max(0, startTimeMs - now),
+        timeLeftToEndMs: endTimeMs !== null ? Math.max(0, endTimeMs - now) : 0
+      };
+    }
+
+    // Jika sudah lewat waktu tutup
+    if (endTimeMs !== null && now > endTimeMs) {
+      return {
+        status: 'closed',
+        isLocked: true,
+        isBeforeStart: false,
+        isAfterEnd: true,
+        isOpen: false,
+        formattedStart,
+        formattedEnd,
+        timeLeftToStartMs: 0,
+        timeLeftToEndMs: 0
+      };
+    }
+
+    // Jika sedang dalam rentang waktu buka s/d tutup
+    if (startTimeMs !== null || endTimeMs !== null) {
+      return {
+        status: 'open',
+        isLocked: false,
+        isBeforeStart: false,
+        isAfterEnd: false,
+        isOpen: true,
+        formattedStart,
+        formattedEnd,
+        timeLeftToStartMs: 0,
+        timeLeftToEndMs: endTimeMs !== null ? Math.max(0, endTimeMs - now) : 0
+      };
+    }
+
+    return {
+      status: 'not_set',
+      isLocked: false,
+      isBeforeStart: false,
+      isAfterEnd: false,
+      isOpen: true,
+      formattedStart: null,
+      formattedEnd: null,
+      timeLeftToStartMs: 0,
+      timeLeftToEndMs: 0
+    };
   }
 
   public async deleteCategory(categoryId: string, categoryName?: string, eventId?: string): Promise<{ success: boolean; message: string }> {

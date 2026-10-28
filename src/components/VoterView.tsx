@@ -28,7 +28,8 @@ import {
   X,
   Smartphone,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Radio
 } from 'lucide-react';
 import { formatImageUrl } from '../utils/imageUrl';
 import {
@@ -37,6 +38,14 @@ import {
   getSavedVoterDisplayName,
   saveVoterDisplayName
 } from '../utils/deviceFingerprint';
+import {
+  TikTokIcon,
+  YouTubeIcon,
+  InstagramIcon,
+  LiveRadioIcon,
+  sanitizeLiveUrl,
+  hasAnyLiveStream
+} from './LiveStreamIcons';
 
 interface VoterViewProps {
   event: EventModel;
@@ -168,11 +177,40 @@ export const VoterView: React.FC<VoterViewProps> = ({
     }));
   };
 
+  // Ticking time untuk live countdown buka & tutup vote cabang lomba
+  const [currentTime, setCurrentTime] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatCountdown = (ms: number): string => {
+    if (ms <= 0) return '00:00:00';
+    const totalSeconds = Math.floor(ms / 1000);
+    const days = Math.floor(totalSeconds / 86400);
+    const hours = Math.floor((totalSeconds % 86400) / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (days > 0) {
+      return `${days}h ${hours}j ${minutes}m`;
+    }
+    if (hours > 0) {
+      return `${hours}j ${minutes}m ${seconds}s`;
+    }
+    return `${minutes}m ${seconds}s`;
+  };
+
   // ID pemilih yang sah: gunakan ID akun jika login, atau ID perangkat unik permanen jika tidak login
   const effectiveVoterId = currentUser ? currentUser.id : deviceId;
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
   const requiredVotes = activeCategory?.votes_required || 1;
+
+  // Jadwal waktu buka & tutup voting publik khusus untuk cabang lomba yang sedang aktif
+  const categorySchedule = useMemo(() => {
+    return apiService.getCategoryVotingSchedule(activeCategory);
+  }, [activeCategory, currentTime]);
 
   // Hanya admin dan dewan juri yang boleh melihat jumlah perolehan vote
   const canViewLiveVotes = currentUser?.role === 'admin' || currentUser?.role === 'juri';
@@ -255,6 +293,24 @@ export const VoterView: React.FC<VoterViewProps> = ({
   };
 
   const handleOpenVoteModal = (team: TeamModel) => {
+    if (categorySchedule.isBeforeStart) {
+      setNotification({
+        type: 'error',
+        message: `Voting untuk cabang lomba "${activeCategory.nama_kategori}" belum dibuka. Akan dibuka pada ${categorySchedule.formattedStart} (dalam ${formatCountdown(categorySchedule.timeLeftToStartMs)}).`
+      });
+      setTimeout(() => setNotification(null), 4500);
+      return;
+    }
+
+    if (categorySchedule.isAfterEnd) {
+      setNotification({
+        type: 'error',
+        message: `Voting untuk cabang lomba "${activeCategory.nama_kategori}" telah resmi ditutup pada ${categorySchedule.formattedEnd}.`
+      });
+      setTimeout(() => setNotification(null), 4500);
+      return;
+    }
+
     if (isSubEventClosed) {
       const msg = closedStatus.reason === 'not_active'
         ? `Event ${currentSubEvent.nama_event} saat ini berstatus DITUTUP oleh panitia. Hak voting tidak dapat digunakan.`
@@ -288,6 +344,18 @@ export const VoterView: React.FC<VoterViewProps> = ({
 
   const handleConfirmVote = async () => {
     if (!teamToVote) return;
+
+    if (categorySchedule.isBeforeStart || categorySchedule.isAfterEnd) {
+      setNotification({
+        type: 'error',
+        message: categorySchedule.isBeforeStart
+          ? `Gagal: Voting cabang ini belum dibuka (dibuka pada ${categorySchedule.formattedStart}).`
+          : `Gagal: Voting cabang ini telah ditutup pada ${categorySchedule.formattedEnd}.`
+      });
+      setIsSubmitting(false);
+      setTeamToVote(null);
+      return;
+    }
 
     if (isSubEventClosed) {
       setNotification({
@@ -565,12 +633,21 @@ export const VoterView: React.FC<VoterViewProps> = ({
             const isCatComplete = userVotesCountInCat >= catVotesReq;
 
             return (
-              <button
+              <div
                 key={cat.id_kategori}
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   setSelectedCategoryId(cat.id_kategori);
                   setSearchQuery('');
                   if (onSelectCategory) onSelectCategory(cat.id_kategori);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    setSelectedCategoryId(cat.id_kategori);
+                    setSearchQuery('');
+                    if (onSelectCategory) onSelectCategory(cat.id_kategori);
+                  }
                 }}
                 className={`p-4 rounded-2xl text-left border transition-all relative flex flex-col justify-between cursor-pointer ${
                   isSelected
@@ -615,6 +692,102 @@ export const VoterView: React.FC<VoterViewProps> = ({
                   }`}>
                     {cat.deskripsi}
                   </div>
+
+                  {/* Live Streaming Badges on Category Card (Only shown if filled) */}
+                  {hasAnyLiveStream(cat) && (
+                    <div
+                      className={`mt-2.5 pt-2 border-t flex flex-wrap items-center gap-1.5 ${
+                        isSelected ? 'border-emerald-800' : 'border-slate-100'
+                      }`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className={`flex items-center gap-1 text-[10px] font-bold ${
+                        isSelected ? 'text-amber-300' : 'text-rose-600'
+                      }`}>
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                        <span>Live:</span>
+                      </div>
+
+                      {cat.live_youtube && cat.live_youtube.trim() && (
+                        <a
+                          href={sanitizeLiveUrl(cat.live_youtube)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Buka Siaran Langsung YouTube"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-600 hover:bg-red-700 text-white shadow-2xs transition-transform active:scale-95"
+                        >
+                          <YouTubeIcon className="w-2.5 h-2.5" />
+                          <span>YouTube</span>
+                        </a>
+                      )}
+
+                      {cat.live_tiktok && cat.live_tiktok.trim() && (
+                        <a
+                          href={sanitizeLiveUrl(cat.live_tiktok)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Buka Siaran Langsung TikTok"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-black hover:bg-slate-800 text-white shadow-2xs transition-transform active:scale-95"
+                        >
+                          <TikTokIcon className="w-2.5 h-2.5" />
+                          <span>TikTok</span>
+                        </a>
+                      )}
+
+                      {cat.live_instagram && cat.live_instagram.trim() && (
+                        <a
+                          href={sanitizeLiveUrl(cat.live_instagram)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Buka Siaran Langsung Instagram"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-90 text-white shadow-2xs transition-transform active:scale-95"
+                        >
+                          <InstagramIcon className="w-2.5 h-2.5" />
+                          <span>Instagram</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Schedule Indicator on Category Tab */}
+                  {(() => {
+                    const catSched = apiService.getCategoryVotingSchedule(cat);
+                    if (catSched.status === 'not_set') return null;
+                    if (catSched.isBeforeStart) {
+                      return (
+                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg ${
+                          isSelected ? 'bg-amber-400 text-slate-950' : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}>
+                          <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                          <span className="truncate">Buka: {catSched.formattedStart}</span>
+                        </div>
+                      );
+                    }
+                    if (catSched.isAfterEnd) {
+                      return (
+                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg ${
+                          isSelected ? 'bg-rose-950 text-rose-200 border border-rose-500/50' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                        }`}>
+                          <Lock className="w-3 h-3 text-rose-600 shrink-0" />
+                          <span>Vote Ditutup</span>
+                        </div>
+                      );
+                    }
+                    if (catSched.isOpen && cat.voting_end) {
+                      return (
+                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-lg ${
+                          isSelected ? 'bg-emerald-800/80 text-emerald-200' : 'bg-emerald-50 text-emerald-800'
+                        }`}>
+                          <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span className="truncate">S/d: {catSched.formattedEnd}</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 <div className={`mt-3 pt-2 text-xs flex items-center justify-between border-t ${
@@ -629,11 +802,170 @@ export const VoterView: React.FC<VoterViewProps> = ({
                     <span className="text-[11px] opacity-75">Hasil Tertutup</span>
                   )}
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
       </div>
+
+      {/* 3b. Dedicated Live Stream Banner for Active Category (Only shown if filled) */}
+      {hasAnyLiveStream(activeCategory) && (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-rose-950 via-red-950 to-rose-900 text-white border border-rose-800/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 animate-in fade-in duration-200">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-rose-800/60 border border-rose-600/50 flex items-center justify-center shrink-0 text-amber-300">
+              <Radio className="w-4 h-4 sm:w-5 sm:h-5 text-rose-300 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-rose-600 text-white tracking-wider animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                  Siaran Langsung
+                </span>
+                <span className="text-xs sm:text-sm font-bold text-rose-100">{activeCategory.nama_kategori}</span>
+              </div>
+              <p className="text-[11px] sm:text-xs text-rose-200/90 mt-0.5 leading-snug">
+                Referensi orang tua/wali santri untuk menyaksikan penampilan santri/peserta secara langsung:
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0 pt-1 md:pt-0 border-t md:border-t-0 border-rose-800/50">
+            {activeCategory.live_youtube && activeCategory.live_youtube.trim() && (
+              <a
+                href={sanitizeLiveUrl(activeCategory.live_youtube)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-transform active:scale-95 cursor-pointer"
+              >
+                <YouTubeIcon className="w-3.5 h-3.5" />
+                <span>Nonton di YouTube</span>
+              </a>
+            )}
+
+            {activeCategory.live_tiktok && activeCategory.live_tiktok.trim() && (
+              <a
+                href={sanitizeLiveUrl(activeCategory.live_tiktok)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-black hover:bg-slate-900 text-white border border-slate-700 shadow-xs transition-transform active:scale-95 cursor-pointer"
+              >
+                <TikTokIcon className="w-3 h-3" />
+                <span>Nonton di TikTok</span>
+              </a>
+            )}
+
+            {activeCategory.live_instagram && activeCategory.live_instagram.trim() && (
+              <a
+                href={sanitizeLiveUrl(activeCategory.live_instagram)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:opacity-95 text-white shadow-xs transition-transform active:scale-95 cursor-pointer"
+              >
+                <InstagramIcon className="w-3.5 h-3.5" />
+                <span>Nonton di Instagram</span>
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3c. Banner Waktu Buka & Tutup Vote Publik untuk Cabang Lomba Aktif */}
+      {categorySchedule.status !== 'not_set' && (
+        <div className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
+          categorySchedule.isBeforeStart
+            ? 'bg-gradient-to-r from-amber-950/95 via-amber-900/90 to-yellow-950/95 border-amber-500/50 text-amber-100 shadow-md ring-1 ring-amber-500/20'
+            : categorySchedule.isAfterEnd
+            ? 'bg-gradient-to-r from-rose-950/95 via-red-950/90 to-rose-900/95 border-rose-500/50 text-rose-100 shadow-md ring-1 ring-rose-500/20'
+            : 'bg-gradient-to-r from-emerald-950/90 via-teal-950/85 to-emerald-900/90 border-emerald-600/40 text-emerald-100 shadow-xs'
+        }`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                categorySchedule.isBeforeStart
+                  ? 'bg-amber-800/60 border-amber-500/40 text-amber-300'
+                  : categorySchedule.isAfterEnd
+                  ? 'bg-rose-800/60 border-rose-500/40 text-rose-300'
+                  : 'bg-emerald-800/60 border-emerald-500/40 text-emerald-300'
+              }`}>
+                {categorySchedule.isBeforeStart ? (
+                  <Clock className="w-5 h-5 animate-pulse" />
+                ) : categorySchedule.isAfterEnd ? (
+                  <Lock className="w-5 h-5" />
+                ) : (
+                  <Sparkles className="w-5 h-5 text-amber-300" />
+                )}
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                    categorySchedule.isBeforeStart
+                      ? 'bg-amber-400 text-slate-950'
+                      : categorySchedule.isAfterEnd
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-emerald-500 text-slate-950'
+                  }`}>
+                    {categorySchedule.isBeforeStart ? (
+                      <>
+                        <Lock className="w-3 h-3" />
+                        <span>Vote Belum Dibuka (Terkunci)</span>
+                      </>
+                    ) : categorySchedule.isAfterEnd ? (
+                      <>
+                        <Lock className="w-3 h-3" />
+                        <span>Vote Telah Ditutup</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping"></span>
+                        <span>Vote Sedang Berlangsung</span>
+                      </>
+                    )}
+                  </span>
+                  <span className="text-xs sm:text-sm font-bold text-white">
+                    {activeCategory.nama_kategori}
+                  </span>
+                </div>
+
+                <p className="text-xs mt-1 leading-relaxed opacity-90">
+                  {categorySchedule.isBeforeStart ? (
+                    <>
+                      Voting dibuka pada <strong>{categorySchedule.formattedStart}</strong>. Saat ini tombol vote terkunci, namun Anda tetap dapat melihat foto dan profil seluruh regu di bawah ini untuk menunggu.
+                    </>
+                  ) : categorySchedule.isAfterEnd ? (
+                    <>
+                      Periode pemilihan suara untuk cabang lomba ini telah resmi berakhir pada <strong>{categorySchedule.formattedEnd}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Voting sedang aktif dan menerima suara pemilih!
+                      {categorySchedule.formattedEnd && (
+                        <> Ditutup pada <strong>{categorySchedule.formattedEnd}</strong>.</>
+                      )}
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Live Countdown Badge */}
+            {(categorySchedule.isBeforeStart || (categorySchedule.isOpen && categorySchedule.formattedEnd)) && (
+              <div className={`px-4 py-2 rounded-xl shrink-0 font-mono text-xs font-bold flex items-center justify-between md:justify-center gap-2 border self-stretch md:self-auto ${
+                categorySchedule.isBeforeStart
+                  ? 'bg-amber-900/60 border-amber-400/40 text-amber-200'
+                  : 'bg-emerald-900/60 border-emerald-400/40 text-emerald-200'
+              }`}>
+                <Clock className="w-4 h-4 shrink-0 text-amber-300" />
+                <span>
+                  {categorySchedule.isBeforeStart
+                    ? `Dibuka dalam: ${formatCountdown(categorySchedule.timeLeftToStartMs)}`
+                    : `Sisa waktu: ${formatCountdown(categorySchedule.timeLeftToEndMs)}`}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 4. Quota Status & Information Bar (Clean & Responsive for HP and Desktop) */}
       <div className={`p-3.5 sm:p-4 rounded-2xl border text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 transition-all ${
@@ -916,7 +1248,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
                         <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
                         <span>Pilihan Anda Terpilih</span>
                       </div>
-                      {!isSubEventClosed && (
+                      {!isSubEventClosed && !categorySchedule.isAfterEnd && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -934,6 +1266,24 @@ export const VoterView: React.FC<VoterViewProps> = ({
                         </button>
                       )}
                     </div>
+                  ) : categorySchedule.isBeforeStart ? (
+                    <button
+                      disabled
+                      className="w-full min-h-[44px] py-2.5 px-3 text-xs font-bold text-amber-200 bg-amber-950/85 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5 border border-amber-500/40 shadow-xs"
+                      title={`Voting dibuka pada ${categorySchedule.formattedStart}`}
+                    >
+                      <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Vote Belum Dibuka ({formatCountdown(categorySchedule.timeLeftToStartMs)})</span>
+                    </button>
+                  ) : categorySchedule.isAfterEnd ? (
+                    <button
+                      disabled
+                      className="w-full min-h-[44px] py-2.5 px-3 text-xs font-bold text-rose-200 bg-rose-950/85 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5 border border-rose-500/40 shadow-xs"
+                      title={`Voting ditutup pada ${categorySchedule.formattedEnd}`}
+                    >
+                      <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>Voting Telah Ditutup</span>
+                    </button>
                   ) : isSubEventClosed ? (
                     <button
                       disabled

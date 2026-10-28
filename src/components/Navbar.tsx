@@ -212,7 +212,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={onOpenAuth}
                   className="px-4 py-2 text-xs font-semibold text-white bg-emerald-800 rounded-lg hover:bg-emerald-700 transition-colors whitespace-nowrap shadow-sm cursor-pointer"
                 >
-                  Masuk / Daftar
+                  Masuk (Juri / Admin)
                 </button>
               )}
             </div>
