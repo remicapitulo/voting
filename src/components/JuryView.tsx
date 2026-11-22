@@ -127,8 +127,8 @@ export const JuryView: React.FC<JuryViewProps> = ({
     }
   }, [selectedSubEventId, subEventCategories]);
 
-  // Teams belonging to the current sub-event
-  const subEventTeams = useMemo(() => {
+  // Semua peserta milik sub-event aktif
+  const allSubEventTeams = useMemo(() => {
     const list = teams.filter(t => t.id_event === selectedSubEventId);
     return list.length > 0 ? list : teams;
   }, [teams, selectedSubEventId]);
@@ -174,41 +174,32 @@ export const JuryView: React.FC<JuryViewProps> = ({
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
 
-  // If not logged in or not a jury/admin, show prompt
-  if (!currentUser || (currentUser.role !== 'juri' && currentUser.role !== 'admin')) {
-    return (
-      <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
-        <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Award className="w-7 h-7" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Akses Eksklusif Dewan Juri</h2>
-        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-          Halaman penilaian ini khusus diperuntukkan bagi Dewan Juri resmi yang telah ditugaskan oleh Admin Panitia SMPIT Pondok Duta.
-        </p>
-        <button
-          onClick={onOpenAuth}
-          className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-        >
-          Masuk sebagai Dewan Juri
-        </button>
-      </div>
-    );
-  }
+  const isCategoryIndividual = activeCategory?.tipe_peserta === 'Individu';
+
+  // Peserta yang sesuai dengan jenis cabang lomba aktif (Individu vs Group/Regu)
+  const subEventTeams = useMemo(() => {
+    const requiredType: 'Group' | 'Individu' = isCategoryIndividual ? 'Individu' : 'Group';
+    return allSubEventTeams.filter(t => (t.tipe_partisipasi || 'Group') === requiredType);
+  }, [allSubEventTeams, isCategoryIndividual]);
 
   // Get all scores given by this specific jury for the current category
-  const myCategoryScores = juryScores.filter(
-    s => s.id_jury === currentUser.id && s.id_kategori === selectedCategoryId
-  );
+  const myCategoryScores = useMemo(() => {
+    if (!currentUser) return [];
+    return juryScores.filter(
+      s => s.id_jury === currentUser.id && s.id_kategori === selectedCategoryId
+    );
+  }, [juryScores, currentUser, selectedCategoryId]);
 
   const isAssignedToActiveCategory = useMemo(() => {
     if (!currentUser || currentUser.role === 'admin') return true;
-    if (!activeCategory.assigned_juries || activeCategory.assigned_juries.length === 0) return true;
+    if (!activeCategory?.assigned_juries || activeCategory.assigned_juries.length === 0) return true;
     return activeCategory.assigned_juries.includes(currentUser.id) ||
            activeCategory.assigned_juries.includes(currentUser.username);
   }, [activeCategory, currentUser]);
 
+  const validTeamIdSet = useMemo(() => new Set(subEventTeams.map(t => t.id_team)), [subEventTeams]);
   const totalTeams = subEventTeams.length;
-  const gradedTeamsCount = myCategoryScores.filter(s => s.is_final).length;
+  const gradedTeamsCount = myCategoryScores.filter(s => s.is_final && validTeamIdSet.has(s.id_team)).length;
   const progressPercent = totalTeams > 0 ? Math.round((gradedTeamsCount / totalTeams) * 100) : 0;
 
   // Filter and sort teams A-Z
@@ -241,6 +232,27 @@ export const JuryView: React.FC<JuryViewProps> = ({
         }
       });
   }, [subEventTeams, searchQuery, statusFilter, sortOrder, myCategoryScores]);
+
+  // If not logged in or not a jury/admin, show prompt
+  if (!currentUser || (currentUser.role !== 'juri' && currentUser.role !== 'admin')) {
+    return (
+      <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
+        <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Award className="w-7 h-7" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Akses Eksklusif Dewan Juri</h2>
+        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+          Halaman penilaian ini khusus diperuntukkan bagi Dewan Juri resmi yang telah ditugaskan oleh Admin Panitia SMPIT Pondok Duta.
+        </p>
+        <button
+          onClick={onOpenAuth}
+          className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+        >
+          Masuk sebagai Dewan Juri
+        </button>
+      </div>
+    );
+  }
 
   // Open scoring panel for a team
   const handleOpenScoring = (team: TeamModel) => {
@@ -440,7 +452,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
                 ></div>
               </div>
               <div className="text-[10px] text-slate-500 mt-1">
-                {currentSubEvent.tipe_peserta === 'Individu' ? 'Peserta' : 'Regu'} dalam kategori aktif
+                {isCategoryIndividual ? 'Peserta Individu' : 'Regu'} dalam kategori aktif
               </div>
             </div>
 
@@ -477,8 +489,11 @@ export const JuryView: React.FC<JuryViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {subEventCategories.map(c => {
               const isSelected = c.id_kategori === selectedCategoryId;
+              const catReqType: 'Group' | 'Individu' = c.tipe_peserta === 'Individu' ? 'Individu' : 'Group';
+              const catMatchingTeams = allSubEventTeams.filter(t => (t.tipe_partisipasi || 'Group') === catReqType);
+              const catTeamIds = new Set(catMatchingTeams.map(t => t.id_team));
               const countGradedInCat = juryScores.filter(
-                s => s.id_jury === currentUser.id && s.id_kategori === c.id_kategori && s.is_final
+                s => s.id_jury === currentUser.id && s.id_kategori === c.id_kategori && s.is_final && catTeamIds.has(s.id_team)
               ).length;
               const isAssigned = (!c.assigned_juries || c.assigned_juries.length === 0)
                 ? true
@@ -500,15 +515,16 @@ export const JuryView: React.FC<JuryViewProps> = ({
                   }`}
                 >
                   <div className="truncate pr-2">
-                    <span className="truncate">{c.nama_kategori}</span>
-                    {!isAssigned && (
-                      <span className="text-[10px] text-amber-500 font-normal block">Bukan Penilai</span>
-                    )}
+                    <span className="truncate block">{c.nama_kategori}</span>
+                    <span className={`text-[10px] font-normal block ${isSelected ? 'text-emerald-200' : 'text-slate-500'}`}>
+                      {catReqType === 'Individu' ? 'Individu' : 'Group / Regu'}
+                      {!isAssigned ? ' · Bukan Penilai' : ''}
+                    </span>
                   </div>
                   <span className={`text-[11px] font-mono tabular-nums px-2 py-0.5 rounded shrink-0 ${
                     isSelected ? 'bg-emerald-800 text-amber-300' : 'bg-slate-200 text-slate-600'
                   }`}>
-                    {countGradedInCat}/{subEventTeams.length}
+                    {countGradedInCat}/{catMatchingTeams.length}
                   </span>
                 </button>
               );
@@ -600,7 +616,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`Cari nama ${currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'}, pangkalan, atau kelas...`}
+              placeholder={`Cari nama ${isCategoryIndividual ? 'peserta' : 'regu'}, pangkalan, atau kelas...`}
               className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-700 bg-slate-50/50"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -656,7 +672,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
 
         <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
           <span>
-            Menampilkan <strong>{processedTeams.length}</strong> {currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'} (Urut A-Z) · Form memuat{' '}
+            Menampilkan <strong>{processedTeams.length}</strong> {isCategoryIndividual ? 'peserta' : 'regu'} (Urut {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}) · Form memuat{' '}
             <strong className="text-emerald-800">{activeCategory?.kriteria?.length || 0} kriteria pertanyaan</strong>
           </span>
           <span className="text-slate-400">Skala Penilaian: 1 (Kurang) s/d 5 (Istimewa)</span>
@@ -664,9 +680,27 @@ export const JuryView: React.FC<JuryViewProps> = ({
       </div>
 
       {/* Main Grid: Teams List to Grade */}
-      {processedTeams.length === 0 ? (
+      {subEventTeams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center space-y-2">
+          <div className="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+            {isCategoryIndividual ? <UserIcon className="w-5 h-5" /> : <Users className="w-5 h-5" />}
+          </div>
+          <p className="text-sm font-bold text-slate-800">
+            {isCategoryIndividual
+              ? `Belum ada peserta individu terdaftar untuk cabang "${activeCategory?.nama_kategori}".`
+              : `Belum ada regu/group terdaftar untuk cabang "${activeCategory?.nama_kategori}".`}
+          </p>
+          <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+            {isCategoryIndividual
+              ? 'Cabang lomba bertipe Individu hanya menampilkan nama-nama peserta perorangan (bukan regu/group). Admin dapat menambahkan peserta bertipe Individu melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'
+              : 'Admin dapat menambahkan regu/group melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'}
+          </p>
+        </div>
+      ) : processedTeams.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <p className="text-sm font-semibold text-slate-700">Tidak ada peserta yang cocok dengan kriteria pencarian.</p>
+          <p className="text-sm font-semibold text-slate-700">
+            Tidak ada {isCategoryIndividual ? 'peserta' : 'regu'} yang cocok dengan kriteria pencarian.
+          </p>
           <button
             onClick={() => {
               setSearchQuery('');
@@ -682,7 +716,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
           {processedTeams.map(team => {
             const scoreObj = myCategoryScores.find(s => s.id_team === team.id_team);
             const isGraded = Boolean(scoreObj?.is_final);
-            const isIndividual = team.tipe_partisipasi === 'Individu';
+            const isIndividual = team.tipe_partisipasi === 'Individu' || isCategoryIndividual;
 
             return (
               <div

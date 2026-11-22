@@ -16,6 +16,7 @@ var SHEETS = {
   EVENTS: 'Events',
   CATEGORIES: 'Categories',
   TEAMS: 'Teams',
+  INDIVIDUAL_PARTICIPANTS: 'Peserta_Individu',
   JURY_SCORES: 'Jury_Scores',
   PUBLIC_VOTES: 'Public_Votes',
   CONFIG: 'Config'
@@ -56,6 +57,10 @@ var SCHEMAS = [
   {
     name: SHEETS.TEAMS,
     headers: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota', 'ketua_regu', 'motto', 'tipe_partisipasi']
+  },
+  {
+    name: SHEETS.INDIVIDUAL_PARTICIPANTS,
+    headers: ['id_peserta', 'id_event', 'nama_peserta', 'kelas_kontingen', 'kategori_gender', 'foto_url', 'pembimbing', 'motto']
   },
   {
     name: SHEETS.JURY_SCORES,
@@ -189,6 +194,10 @@ function doPost(e) {
       case 'manageTeam':
         response = handleManageTeam(body);
         break;
+      case 'manageIndividual':
+      case 'managePesertaIndividu':
+        response = handleManageIndividual(body);
+        break;
       case 'manageJury':
         response = handleManageJury(body);
         break;
@@ -219,6 +228,22 @@ function getAllDatabaseData() {
     ensureHeaderExists(teamSheet, 'ketua_regu');
     ensureHeaderExists(teamSheet, 'motto');
     ensureHeaderExists(teamSheet, 'tipe_partisipasi');
+  }
+
+  var indSheet = ss.getSheetByName(SHEETS.INDIVIDUAL_PARTICIPANTS);
+  if (!indSheet) {
+    indSheet = ss.insertSheet(SHEETS.INDIVIDUAL_PARTICIPANTS);
+    var indHeaders = ['id_peserta', 'id_event', 'nama_peserta', 'kelas_kontingen', 'kategori_gender', 'foto_url', 'pembimbing', 'motto'];
+    indSheet.appendRow(indHeaders);
+    indSheet.getRange(1, 1, 1, indHeaders.length)
+      .setFontWeight('bold')
+      .setBackground('#312e81')
+      .setFontColor('#ffffff');
+    indSheet.setFrozenRows(1);
+  } else {
+    ensureHeaderExists(indSheet, 'foto_url');
+    ensureHeaderExists(indSheet, 'pembimbing');
+    ensureHeaderExists(indSheet, 'motto');
   }
 
   var catSheet = ss.getSheetByName(SHEETS.CATEGORIES);
@@ -270,6 +295,7 @@ function getAllDatabaseData() {
     events: getSheetDataAsObjects(ss.getSheetByName(SHEETS.EVENTS)),
     categories: getSheetDataAsObjects(catSheet),
     teams: getSheetDataAsObjects(teamSheet),
+    individual_participants: getSheetDataAsObjects(indSheet),
     jury_scores: getSheetDataAsObjects(ss.getSheetByName(SHEETS.JURY_SCORES)),
     public_votes: getSheetDataAsObjects(ss.getSheetByName(SHEETS.PUBLIC_VOTES)),
     config: configMap
@@ -786,28 +812,111 @@ function handleUpdateCategoryLiveLinks(data) {
   };
 }
 
+function ensureIndividualSheet(ss) {
+  var sheet = ss.getSheetByName(SHEETS.INDIVIDUAL_PARTICIPANTS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEETS.INDIVIDUAL_PARTICIPANTS);
+    var headers = ['id_peserta', 'id_event', 'nama_peserta', 'kelas_kontingen', 'kategori_gender', 'foto_url', 'pembimbing', 'motto'];
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#312e81')
+      .setFontColor('#ffffff');
+    sheet.setFrozenRows(1);
+  } else {
+    ensureHeaderExists(sheet, 'foto_url');
+    ensureHeaderExists(sheet, 'pembimbing');
+    ensureHeaderExists(sheet, 'motto');
+  }
+  return sheet;
+}
+
+function deleteRowByIdFromSheet(sheet, targetId) {
+  if (!sheet || !targetId) return false;
+  var rows = sheet.getDataRange().getValues();
+  var deleted = false;
+  for (var r = rows.length - 1; r >= 1; r--) {
+    if (String(rows[r][0] || '').trim() === String(targetId).trim()) {
+      sheet.deleteRow(r + 1);
+      deleted = true;
+    }
+  }
+  return deleted;
+}
+
+function handleManageIndividual(data) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ensureIndividualSheet(ss);
+  var teamSheet = ss.getSheetByName(SHEETS.TEAMS);
+
+  var op = data.operation || 'create';
+  var idPeserta = String(data.id_peserta || data.id_team || ('ind-' + new Date().getTime())).trim();
+  var rows = sheet.getDataRange().getValues();
+
+  if (op === 'delete') {
+    var removedInd = deleteRowByIdFromSheet(sheet, idPeserta);
+    var removedTeam = deleteRowByIdFromSheet(teamSheet, idPeserta);
+    if (removedInd || removedTeam) {
+      return { status: 'success', message: 'Peserta individu berhasil dihapus dari Sheet Peserta_Individu.' };
+    }
+    return { status: 'error', message: 'Peserta individu tidak ditemukan.' };
+  }
+
+  var indObj = {
+    id_peserta: idPeserta,
+    id_event: data.id_event || 'duta-camp-2026',
+    nama_peserta: data.nama_peserta || data.nama_regu || '',
+    kelas_kontingen: data.kelas_kontingen || data.kelas_pangkalan || '',
+    kategori_gender: data.kategori_gender || data.kategori_regu || 'Putra',
+    foto_url: data.foto_url || '',
+    pembimbing: data.pembimbing || data.ketua_regu || '',
+    motto: data.motto || ''
+  };
+
+  if (op === 'update') {
+    // Jika peserta sebelumnya berada di sheet Teams lalu diubah menjadi Individu, hapus dari Teams
+    deleteRowByIdFromSheet(teamSheet, idPeserta);
+    for (var i = 1; i < rows.length; i++) {
+      if (String(rows[i][0] || '').trim() === idPeserta) {
+        updateRowByHeaders(sheet, i + 1, indObj);
+        return { status: 'success', message: 'Data peserta individu berhasil diperbarui di Sheet Peserta_Individu.' };
+      }
+    }
+  }
+
+  appendRowByHeaders(sheet, indObj);
+  return { status: 'success', message: 'Peserta individu berhasil disimpan ke Sheet Peserta_Individu.' };
+}
+
 function handleManageTeam(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var op = data.operation || 'create';
+  var partType = String(data.tipe_partisipasi || 'Group').trim().toLowerCase();
+
+  // Jika tipe_partisipasi adalah Individu pada create/update, arahkan ke Sheet Peserta_Individu
+  if (op !== 'delete' && (partType === 'individu' || partType === 'perorangan')) {
+    return handleManageIndividual(data);
+  }
+
   var sheet = ss.getSheetByName(SHEETS.TEAMS);
   if (!sheet) {
     setupDatabaseSheets();
     sheet = ss.getSheetByName(SHEETS.TEAMS);
   }
+  var indSheet = ss.getSheetByName(SHEETS.INDIVIDUAL_PARTICIPANTS);
 
   ensureHeaderExists(sheet, 'ketua_regu');
   ensureHeaderExists(sheet, 'motto');
   ensureHeaderExists(sheet, 'tipe_partisipasi');
 
-  var op = data.operation || 'create';
-  var idTeam = String(data.id_team || ('team-' + new Date().getTime()));
+  var idTeam = String(data.id_team || ('team-' + new Date().getTime())).trim();
   var rows = sheet.getDataRange().getValues();
 
   if (op === 'delete') {
-    for (var r = 1; r < rows.length; r++) {
-      if (String(rows[r][0]) === idTeam) {
-        sheet.deleteRow(r + 1);
-        return { status: 'success', message: 'Peserta berhasil dihapus' };
-      }
+    var removedTeam = deleteRowByIdFromSheet(sheet, idTeam);
+    var removedInd = deleteRowByIdFromSheet(indSheet, idTeam);
+    if (removedTeam || removedInd) {
+      return { status: 'success', message: 'Peserta berhasil dihapus dari database.' };
     }
     return { status: 'error', message: 'Peserta tidak ditemukan' };
   }
@@ -823,20 +932,22 @@ function handleManageTeam(data) {
     anggota: anggotaStr,
     ketua_regu: data.ketua_regu || '',
     motto: data.motto || '',
-    tipe_partisipasi: data.tipe_partisipasi || 'Group'
+    tipe_partisipasi: 'Group'
   };
 
   if (op === 'update') {
+    // Jika peserta sebelumnya berada di sheet Peserta_Individu lalu diubah menjadi Group, hapus dari Peserta_Individu
+    deleteRowByIdFromSheet(indSheet, idTeam);
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === idTeam) {
+      if (String(rows[i][0] || '').trim() === idTeam) {
         updateRowByHeaders(sheet, i + 1, teamObj);
-        return { status: 'success', message: 'Data peserta berhasil diperbarui' };
+        return { status: 'success', message: 'Data regu/group berhasil diperbarui di Sheet Teams.' };
       }
     }
   }
 
   appendRowByHeaders(sheet, teamObj);
-  return { status: 'success', message: 'Peserta berhasil ditambahkan' };
+  return { status: 'success', message: 'Regu/group berhasil ditambahkan ke Sheet Teams.' };
 }
 
 function handleManageJury(data) {

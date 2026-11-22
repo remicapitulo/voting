@@ -14,6 +14,7 @@ import {
   LOGO_PRAMUKA_SVG
 } from '../utils/reportLogos';
 import { formatImageUrl } from '../utils/imageUrl';
+import { toDateTimeLocalValue } from '../utils/dateTime';
 import {
   INITIAL_EVENT,
   INITIAL_EVENTS,
@@ -23,6 +24,14 @@ import {
   INITIAL_JURY_SCORES,
   INITIAL_PUBLIC_VOTES
 } from '../data/initialData';
+
+const normalizeParticipantType = (raw: any): 'Group' | 'Individu' => {
+  const val = String(raw || '').trim().toLowerCase();
+  if (val === 'individu' || val === 'perorangan' || val === 'individual' || val === 'peserta') {
+    return 'Individu';
+  }
+  return 'Group';
+};
 
 const STORAGE_KEYS = {
   GAS_URL: 'duta_camp_gas_url',
@@ -411,7 +420,7 @@ class ApiService {
             assessment_type: (c.assessment_type === 'public_only' || c.assessment_type === 'jury_only' || c.assessment_type === 'all')
               ? c.assessment_type
               : 'all',
-            tipe_peserta: c.tipe_peserta || 'Group',
+            tipe_peserta: normalizeParticipantType(c.tipe_peserta || c.tipePeserta || c['Tipe Peserta']),
             votes_required: Number(c.votes_required) || 1,
             kriteria: kriteriaArr,
             deskripsi: c.deskripsi ? String(c.deskripsi) : '',
@@ -420,8 +429,8 @@ class ApiService {
             live_tiktok: String(c.live_tiktok || c.liveTiktok || c['Live TikTok'] || c['link_live_tiktok'] || c['Link Live TikTok'] || c.tiktok || '').trim(),
             live_youtube: String(c.live_youtube || c.liveYoutube || c['Live YouTube'] || c['Live Youtube'] || c['link_live_youtube'] || c['Link Live YouTube'] || c.youtube || '').trim(),
             live_instagram: String(c.live_instagram || c.liveInstagram || c['Live Instagram'] || c['link_live_instagram'] || c['Link Live Instagram'] || c.instagram || '').trim(),
-            voting_start: String(c.voting_start || c.votingStart || c['voting_start'] || c['waktu_buka'] || c['Waktu Buka'] || c['Waktu Dibuka'] || '').trim(),
-            voting_end: String(c.voting_end || c.votingEnd || c['voting_end'] || c['waktu_tutup'] || c['Waktu Tutup'] || c['Waktu Ditutup'] || '').trim()
+            voting_start: toDateTimeLocalValue(c.voting_start || c.votingStart || c['voting_start'] || c['waktu_buka'] || c['Waktu Buka'] || c['Waktu Dibuka'] || ''),
+            voting_end: toDateTimeLocalValue(c.voting_end || c.votingEnd || c['voting_end'] || c['waktu_tutup'] || c['Waktu Tutup'] || c['Waktu Ditutup'] || '')
           });
         }
 
@@ -469,8 +478,38 @@ class ApiService {
             anggota: anggotaArr,
             motto: t.motto !== undefined ? String(t.motto) : '',
             ketua_regu: t.ketua_regu !== undefined ? String(t.ketua_regu) : '',
-            tipe_partisipasi: (t.tipe_partisipasi === 'Individu' || t.tipe_partisipasi === 'Group') ? t.tipe_partisipasi : 'Group',
+            tipe_partisipasi: normalizeParticipantType(t.tipe_partisipasi || t.tipePartisipasi || t['Tipe Partisipasi'] || t['tipe_peserta']),
             color_theme: t.color_theme || 'emerald'
+          });
+        }
+      }
+
+      // Normalisasi & Deduplikasi Peserta Individu dari Sheet Peserta_Individu
+      const rawIndividuals =
+        rawData.individual_participants ||
+        rawData.peserta_individu ||
+        rawData.individuals ||
+        [];
+      for (const p of rawIndividuals) {
+        const id = String(p.id_peserta || p.id_team || p.id || '').trim();
+        if (id && !seenTeamIds.has(id)) {
+          seenTeamIds.add(id);
+          const rawGender = String(p.kategori_gender || p.kategori_regu || p.gender || 'Putra').trim().toLowerCase();
+          const katGender: 'Putra' | 'Putri' = rawGender === 'putri' || rawGender === 'perempuan' || rawGender === 'p' ? 'Putri' : 'Putra';
+          const fotoUrl = String(p.foto_url || p.foto || '').trim();
+
+          teams.push({
+            id_team: id,
+            id_event: String(p.id_event || ''),
+            nama_regu: String(p.nama_peserta || p.nama || p.nama_regu || '').trim(),
+            kelas_pangkalan: String(p.kelas_kontingen || p.kelas_pangkalan || p.kelas || '').trim(),
+            kategori_regu: katGender,
+            foto_url: formatImageUrl(fotoUrl),
+            anggota: [],
+            motto: p.motto !== undefined ? String(p.motto) : '',
+            ketua_regu: String(p.pembimbing || p.ketua_regu || '').trim(),
+            tipe_partisipasi: 'Individu',
+            color_theme: p.color_theme || 'indigo'
           });
         }
       }
@@ -959,11 +998,23 @@ class ApiService {
   public getAppState(): AppStateData {
     const events = this.getEvents();
     const activeEvent = events.find(e => e.status_aktif) || events[0] || INITIAL_EVENT;
+    const rawCategories: CategoryModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]');
+    const categories = rawCategories.map(cat => ({
+      ...cat,
+      tipe_peserta: normalizeParticipantType(cat.tipe_peserta),
+      voting_start: toDateTimeLocalValue(cat.voting_start),
+      voting_end: toDateTimeLocalValue(cat.voting_end)
+    }));
+    const rawTeams: TeamModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.TEAMS) || '[]');
+    const teams = rawTeams.map(t => ({
+      ...t,
+      tipe_partisipasi: normalizeParticipantType(t.tipe_partisipasi)
+    }));
     return {
       event: activeEvent,
       events: events,
-      categories: JSON.parse(localStorage.getItem(STORAGE_KEYS.CATEGORIES) || '[]'),
-      teams: JSON.parse(localStorage.getItem(STORAGE_KEYS.TEAMS) || '[]'),
+      categories,
+      teams,
       users: JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]'),
       juryScores: JSON.parse(localStorage.getItem(STORAGE_KEYS.JURY_SCORES) || '[]'),
       publicVotes: JSON.parse(localStorage.getItem(STORAGE_KEYS.PUBLIC_VOTES) || '[]'),
@@ -1369,74 +1420,236 @@ class ApiService {
     };
   }
 
-  public addTeam(newTeam: Omit<TeamModel, 'id_team'>): { success: boolean; message: string } {
+  public async setupDatabaseSheets(): Promise<{ success: boolean; message: string }> {
+    if (!this.gasUrl) {
+      return { success: false, message: 'URL Google Apps Script belum diatur.' };
+    }
+    try {
+      const res = await fetch(this.gasUrl, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'setupSheets' })
+      });
+      const json = await res.json();
+      if (json.status === 'success') {
+        await this.syncFromDatabase().catch(console.warn);
+        return {
+          success: true,
+          message: json.message || 'Sheet database (termasuk Peserta_Individu) berhasil disiapkan di Google Sheets!'
+        };
+      }
+      return { success: false, message: json.message || 'Gagal menyiapkan sheet database.' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Gagal menghubungi Google Apps Script.' };
+    }
+  }
+
+  public async addTeam(newTeam: Omit<TeamModel, 'id_team'>): Promise<{ success: boolean; message: string }> {
+    const isIndividu = normalizeParticipantType(newTeam.tipe_partisipasi) === 'Individu';
     const teams: TeamModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.TEAMS) || '[]');
-    const id = `team-${Date.now()}`;
+    const id = `${isIndividu ? 'ind' : 'team'}-${Date.now()}`;
     const team: TeamModel = {
       ...newTeam,
-      id_team: id
+      id_team: id,
+      tipe_partisipasi: isIndividu ? 'Individu' : 'Group',
+      anggota: isIndividu ? [] : (newTeam.anggota || [])
     };
     teams.push(team);
     localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify(teams));
 
+    let gasSavedSheet: 'Peserta_Individu' | 'Teams' | null = null;
     if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'manageTeam',
-          operation: 'create',
-          id_team: team.id_team,
-          id_event: team.id_event,
-          nama_regu: team.nama_regu,
-          kelas_pangkalan: team.kelas_pangkalan,
-          kategori_regu: team.kategori_regu,
-          foto_url: team.foto_url || '',
-          anggota: team.anggota || [],
-          ketua_regu: team.ketua_regu || '',
-          motto: team.motto || '',
-          tipe_partisipasi: team.tipe_partisipasi || 'Group',
-          color_theme: team.color_theme || 'emerald'
-        })
-      }).catch(console.warn);
+      if (isIndividu) {
+        try {
+          const res = await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'manageIndividual',
+              operation: 'create',
+              id_peserta: team.id_team,
+              id_team: team.id_team,
+              id_event: team.id_event,
+              nama_peserta: team.nama_regu,
+              nama_regu: team.nama_regu,
+              kelas_kontingen: team.kelas_pangkalan,
+              kelas_pangkalan: team.kelas_pangkalan,
+              kategori_gender: team.kategori_regu,
+              kategori_regu: team.kategori_regu,
+              foto_url: team.foto_url || '',
+              pembimbing: team.ketua_regu || '',
+              ketua_regu: team.ketua_regu || '',
+              motto: team.motto || '',
+              tipe_partisipasi: 'Individu'
+            })
+          });
+          const json = await res.json().catch(() => null);
+          if (json && json.status === 'success') {
+            gasSavedSheet = 'Peserta_Individu';
+          } else {
+            // Fallback jika GAS belum di-deploy ulang ke versi terbaru
+            const fbRes = await fetch(this.gasUrl, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: 'manageTeam',
+                operation: 'create',
+                id_team: team.id_team,
+                id_event: team.id_event,
+                nama_regu: team.nama_regu,
+                kelas_pangkalan: team.kelas_pangkalan,
+                kategori_regu: team.kategori_regu,
+                foto_url: team.foto_url || '',
+                anggota: [],
+                ketua_regu: team.ketua_regu || '',
+                motto: team.motto || '',
+                tipe_partisipasi: 'Individu',
+                color_theme: team.color_theme || 'indigo'
+              })
+            });
+            const fbJson = await fbRes.json().catch(() => null);
+            if (fbJson && fbJson.status === 'success') {
+              gasSavedSheet = 'Teams';
+            }
+          }
+        } catch (err) {
+          console.warn('Gagal menyimpan peserta individu ke Google Sheets:', err);
+        }
+      } else {
+        try {
+          const res = await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'manageTeam',
+              operation: 'create',
+              id_team: team.id_team,
+              id_event: team.id_event,
+              nama_regu: team.nama_regu,
+              kelas_pangkalan: team.kelas_pangkalan,
+              kategori_regu: team.kategori_regu,
+              foto_url: team.foto_url || '',
+              anggota: team.anggota || [],
+              ketua_regu: team.ketua_regu || '',
+              motto: team.motto || '',
+              tipe_partisipasi: 'Group',
+              color_theme: team.color_theme || 'emerald'
+            })
+          });
+          const json = await res.json().catch(() => null);
+          if (json && json.status === 'success') {
+            gasSavedSheet = 'Teams';
+          }
+        } catch (err) {
+          console.warn('Gagal menyimpan regu ke Google Sheets:', err);
+        }
+      }
     }
 
-    return { success: true, message: `Regu "${team.nama_regu}" berhasil ditambahkan.` };
+    return {
+      success: true,
+      message: isIndividu
+        ? (gasSavedSheet === 'Peserta_Individu'
+            ? `Peserta individu "${team.nama_regu}" berhasil disimpan ke Sheet Peserta_Individu.`
+            : gasSavedSheet === 'Teams'
+              ? `Peserta individu "${team.nama_regu}" tersimpan (perbarui deployment Code.gs agar otomatis masuk ke Sheet Peserta_Individu).`
+              : `Peserta individu "${team.nama_regu}" berhasil ditambahkan.`)
+        : `Regu "${team.nama_regu}" berhasil ditambahkan${gasSavedSheet ? ' ke Sheet Teams' : ''}.`
+    };
   }
 
-  public updateTeam(updatedTeam: TeamModel): { success: boolean; message: string } {
+  public async updateTeam(updatedTeam: TeamModel): Promise<{ success: boolean; message: string }> {
+    const isIndividu = normalizeParticipantType(updatedTeam.tipe_partisipasi) === 'Individu';
+    const cleanedTeam: TeamModel = {
+      ...updatedTeam,
+      tipe_partisipasi: isIndividu ? 'Individu' : 'Group'
+    };
+
     const teams: TeamModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.TEAMS) || '[]');
-    const idx = teams.findIndex(t => t.id_team === updatedTeam.id_team);
+    const idx = teams.findIndex(t => t.id_team === cleanedTeam.id_team);
     if (idx >= 0) {
-      teams[idx] = updatedTeam;
+      teams[idx] = cleanedTeam;
       localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify(teams));
+
       if (this.gasUrl) {
-        fetch(this.gasUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'manageTeam',
-            operation: 'update',
-            id_team: updatedTeam.id_team,
-            id_event: updatedTeam.id_event,
-            nama_regu: updatedTeam.nama_regu,
-            kelas_pangkalan: updatedTeam.kelas_pangkalan,
-            kategori_regu: updatedTeam.kategori_regu,
-            foto_url: updatedTeam.foto_url || '',
-            anggota: updatedTeam.anggota || [],
-            ketua_regu: updatedTeam.ketua_regu || '',
-            motto: updatedTeam.motto || '',
-            tipe_partisipasi: updatedTeam.tipe_partisipasi || 'Group',
-            color_theme: updatedTeam.color_theme || 'emerald'
-          })
-        }).catch(console.warn);
+        if (isIndividu) {
+          try {
+            const res = await fetch(this.gasUrl, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: 'manageIndividual',
+                operation: 'update',
+                id_peserta: cleanedTeam.id_team,
+                id_team: cleanedTeam.id_team,
+                id_event: cleanedTeam.id_event,
+                nama_peserta: cleanedTeam.nama_regu,
+                nama_regu: cleanedTeam.nama_regu,
+                kelas_kontingen: cleanedTeam.kelas_pangkalan,
+                kelas_pangkalan: cleanedTeam.kelas_pangkalan,
+                kategori_gender: cleanedTeam.kategori_regu,
+                kategori_regu: cleanedTeam.kategori_regu,
+                foto_url: cleanedTeam.foto_url || '',
+                pembimbing: cleanedTeam.ketua_regu || '',
+                ketua_regu: cleanedTeam.ketua_regu || '',
+                motto: cleanedTeam.motto || '',
+                tipe_partisipasi: 'Individu'
+              })
+            });
+            const json = await res.json().catch(() => null);
+            if (!json || json.status !== 'success') {
+              await fetch(this.gasUrl, {
+                method: 'POST',
+                body: JSON.stringify({
+                  action: 'manageTeam',
+                  operation: 'update',
+                  id_team: cleanedTeam.id_team,
+                  id_event: cleanedTeam.id_event,
+                  nama_regu: cleanedTeam.nama_regu,
+                  kelas_pangkalan: cleanedTeam.kelas_pangkalan,
+                  kategori_regu: cleanedTeam.kategori_regu,
+                  foto_url: cleanedTeam.foto_url || '',
+                  anggota: cleanedTeam.anggota || [],
+                  ketua_regu: cleanedTeam.ketua_regu || '',
+                  motto: cleanedTeam.motto || '',
+                  tipe_partisipasi: 'Individu',
+                  color_theme: cleanedTeam.color_theme || 'indigo'
+                })
+              }).catch(console.warn);
+            }
+          } catch (err) {
+            console.warn('Gagal memperbarui peserta individu di Google Sheets:', err);
+          }
+        } else {
+          await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'manageTeam',
+              operation: 'update',
+              id_team: cleanedTeam.id_team,
+              id_event: cleanedTeam.id_event,
+              nama_regu: cleanedTeam.nama_regu,
+              kelas_pangkalan: cleanedTeam.kelas_pangkalan,
+              kategori_regu: cleanedTeam.kategori_regu,
+              foto_url: cleanedTeam.foto_url || '',
+              anggota: cleanedTeam.anggota || [],
+              ketua_regu: cleanedTeam.ketua_regu || '',
+              motto: cleanedTeam.motto || '',
+              tipe_partisipasi: 'Group',
+              color_theme: cleanedTeam.color_theme || 'emerald'
+            })
+          }).catch(console.warn);
+        }
       }
-      return { success: true, message: `Data peserta "${updatedTeam.nama_regu}" berhasil diperbarui.` };
+      return {
+        success: true,
+        message: isIndividu
+          ? `Data peserta individu "${cleanedTeam.nama_regu}" berhasil diperbarui.`
+          : `Data regu "${cleanedTeam.nama_regu}" berhasil diperbarui.`
+      };
     }
     return { success: false, message: 'Peserta tidak ditemukan.' };
   }
 
-  public deleteTeam(teamId: string): { success: boolean; message: string } {
+  public async deleteTeam(teamId: string): Promise<{ success: boolean; message: string }> {
     const teams: TeamModel[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.TEAMS) || '[]');
     const target = teams.find(t => t.id_team === teamId);
+    const isIndividu = target ? normalizeParticipantType(target.tipe_partisipasi) === 'Individu' : teamId.startsWith('ind-');
     const filtered = teams.filter(t => t.id_team !== teamId);
     localStorage.setItem(STORAGE_KEYS.TEAMS, JSON.stringify(filtered));
 
@@ -1448,13 +1661,31 @@ class ApiService {
     localStorage.setItem(STORAGE_KEYS.PUBLIC_VOTES, JSON.stringify(votes.filter(v => v.id_team !== teamId)));
 
     if (this.gasUrl) {
-      fetch(this.gasUrl, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'manageTeam', operation: 'delete', id_team: teamId })
-      }).catch(console.warn);
+      if (isIndividu) {
+        try {
+          const res = await fetch(this.gasUrl, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'manageIndividual', operation: 'delete', id_peserta: teamId, id_team: teamId })
+          });
+          const json = await res.json().catch(() => null);
+          if (!json || json.status !== 'success') {
+            await fetch(this.gasUrl, {
+              method: 'POST',
+              body: JSON.stringify({ action: 'manageTeam', operation: 'delete', id_team: teamId })
+            }).catch(console.warn);
+          }
+        } catch (err) {
+          console.warn('Gagal menghapus peserta individu di Google Sheets:', err);
+        }
+      } else {
+        await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'manageTeam', operation: 'delete', id_team: teamId })
+        }).catch(console.warn);
+      }
     }
 
-    return { success: true, message: `Peserta "${target?.nama_regu || teamId}" berhasil dihapus dari sistem.` };
+    return { success: true, message: `${isIndividu ? 'Peserta individu' : 'Regu'} "${target?.nama_regu || teamId}" berhasil dihapus dari sistem.` };
   }
 
   public async addCategory(newCat: Omit<CategoryModel, 'id_kategori'>): Promise<{ success: boolean; message: string; category?: CategoryModel }> {
@@ -1462,8 +1693,8 @@ class ApiService {
     const liveTiktok = (newCat.live_tiktok || '').trim();
     const liveYoutube = (newCat.live_youtube || '').trim();
     const liveInstagram = (newCat.live_instagram || '').trim();
-    const votingStart = (newCat.voting_start || '').trim();
-    const votingEnd = (newCat.voting_end || '').trim();
+    const votingStart = toDateTimeLocalValue(newCat.voting_start);
+    const votingEnd = toDateTimeLocalValue(newCat.voting_end);
 
     const category: CategoryModel = {
       ...newCat,
@@ -1533,8 +1764,8 @@ class ApiService {
     const liveTiktok = (updatedCat.live_tiktok || '').trim();
     const liveYoutube = (updatedCat.live_youtube || '').trim();
     const liveInstagram = (updatedCat.live_instagram || '').trim();
-    const votingStart = (updatedCat.voting_start || '').trim();
-    const votingEnd = (updatedCat.voting_end || '').trim();
+    const votingStart = toDateTimeLocalValue(updatedCat.voting_start);
+    const votingEnd = toDateTimeLocalValue(updatedCat.voting_end);
 
     const cleanedCat: CategoryModel = {
       ...updatedCat,
@@ -1665,7 +1896,8 @@ class ApiService {
 
     if (cat.voting_start && cat.voting_start.trim()) {
       try {
-        const d = new Date(cat.voting_start);
+        const normalizedStart = toDateTimeLocalValue(cat.voting_start);
+        const d = new Date(normalizedStart || cat.voting_start);
         if (!isNaN(d.getTime())) {
           startTimeMs = d.getTime();
           formattedStart = d.toLocaleString('id-ID', {
@@ -1682,7 +1914,8 @@ class ApiService {
 
     if (cat.voting_end && cat.voting_end.trim()) {
       try {
-        const d = new Date(cat.voting_end);
+        const normalizedEnd = toDateTimeLocalValue(cat.voting_end);
+        const d = new Date(normalizedEnd || cat.voting_end);
         if (!isNaN(d.getTime())) {
           endTimeMs = d.getTime();
           formattedEnd = d.toLocaleString('id-ID', {
@@ -2461,8 +2694,14 @@ class ApiService {
     const state = this.getAppState();
     const category = state.categories.find(c => c.id_kategori === categoryId);
     const assessType = category?.assessment_type || 'all';
+    const categoryParticipantType: 'Group' | 'Individu' =
+      category?.tipe_peserta === 'Individu' ? 'Individu' : 'Group';
     const teams = category
-      ? state.teams.filter(t => t.id_event === category.id_event)
+      ? state.teams.filter(
+          t =>
+            t.id_event === category.id_event &&
+            normalizeParticipantType(t.tipe_partisipasi) === categoryParticipantType
+        )
       : state.teams;
     const categoryJuryScores = state.juryScores.filter(s => s.id_kategori === categoryId);
     const categoryPublicVotes = state.publicVotes.filter(v => v.id_kategori === categoryId);

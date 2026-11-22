@@ -627,9 +627,13 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                   </span>
                 </div>
                 <div className="flex items-baseline">
-                  <span className="w-32 text-slate-500 shrink-0">Total Peserta / Regu</span>
+                  <span className="w-32 text-slate-500 shrink-0">
+                    {category.tipe_peserta === 'Individu' ? 'Total Peserta' : 'Total Regu'}
+                  </span>
                   <span className="text-slate-400 mr-2">:</span>
-                  <span className="font-semibold text-slate-900">{recapData.length} Regu</span>
+                  <span className="font-semibold text-slate-900">
+                    {recapData.length} {category.tipe_peserta === 'Individu' ? 'Peserta Individu' : 'Regu / Group'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -640,8 +644,12 @@ export const PrintReportModal: React.FC<PrintReportModalProps> = ({
                 <thead>
                   <tr className="bg-emerald-900 text-white font-bold text-[11px]">
                     <th className="py-2.5 px-2 border border-emerald-950 text-center w-12">Rank</th>
-                    <th className="py-2.5 px-3 border border-emerald-950">Nama Peserta / Regu</th>
-                    <th className="py-2.5 px-3 border border-emerald-950">Pangkalan / Kelas</th>
+                    <th className="py-2.5 px-3 border border-emerald-950">
+                      {category.tipe_peserta === 'Individu' ? 'Nama Siswa / Peserta' : 'Nama Regu / Group'}
+                    </th>
+                    <th className="py-2.5 px-3 border border-emerald-950">
+                      {category.tipe_peserta === 'Individu' ? 'Kelas / Kontingen' : 'Pangkalan / Kelas'}
+                    </th>
                     <th className="py-2.5 px-2 border border-emerald-950 text-right">Rata Juri<br/><span className="text-[9px] font-normal opacity-90">(1 - 5)</span></th>
                     <th className="py-2.5 px-2 border border-emerald-950 text-right">Juri<br/><span className="text-[9px] font-normal opacity-90">(100)</span></th>
                     <th className="py-2.5 px-2 border border-emerald-950 text-right">Vote Publik<br/><span className="text-[9px] font-normal opacity-90">(Suara)</span></th>
