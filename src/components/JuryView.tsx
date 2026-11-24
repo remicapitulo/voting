@@ -191,6 +191,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
 
+<<<<<<< HEAD
   const activeCriteriaList = useMemo(() => {
     return (activeCategory?.kriteria || []).map(k => String(k || '').trim()).filter(Boolean);
   }, [activeCategory]);
@@ -198,6 +199,8 @@ export const JuryView: React.FC<JuryViewProps> = ({
   // Penilaian cepat langsung di kartu aktif untuk 1 sampai 3 kriteria; lebih dari 3 kriteria menggunakan pop-up
   const isQuickScoreMode = activeCriteriaList.length >= 1 && activeCriteriaList.length <= 3;
 
+=======
+>>>>>>> adec82d242b5c65b6f3a83d61d1dfcb076107ac2
   const isCategoryIndividual = activeCategory?.tipe_peserta === 'Individu';
 
   // Peserta yang sesuai dengan jenis cabang lomba aktif (Individu vs Group/Regu)
@@ -835,6 +838,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
           </button>
         </div>
 
+<<<<<<< HEAD
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-1 border-t border-slate-100">
           <span className="flex flex-wrap items-center gap-1.5">
             <span>
@@ -846,6 +850,12 @@ export const JuryView: React.FC<JuryViewProps> = ({
                 Mode Nilai Cepat 1–5 Aktif ({activeCriteriaList.length} Kriteria)
               </span>
             )}
+=======
+        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+          <span>
+            Menampilkan <strong>{processedTeams.length}</strong> {isCategoryIndividual ? 'peserta' : 'regu'} (Urut {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}) · Form memuat{' '}
+            <strong className="text-emerald-800">{activeCategory?.kriteria?.length || 0} kriteria pertanyaan</strong>
+>>>>>>> adec82d242b5c65b6f3a83d61d1dfcb076107ac2
           </span>
           <span className="text-slate-400">Skala Penilaian: 1 (Kurang) s/d 5 (Istimewa)</span>
         </div>
@@ -887,6 +897,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {processedTeams.map(team => {
             const scoreObj = myCategoryScores.find(s => s.id_team === team.id_team);
+<<<<<<< HEAD
             const savedCriteriaMap = scoreObj?.kriteria_scores || {};
             const optimisticMap = optimisticQuickScores[team.id_team] || {};
 
@@ -918,6 +929,9 @@ export const JuryView: React.FC<JuryViewProps> = ({
             const isPartiallyFilled = isQuickScoreMode && !isGraded && filledQuickCount > 0;
             const isQuickSaving = Boolean(quickSavingTeamIds[team.id_team]);
             const isQuickJustSaved = Boolean(quickSavedTeamIds[team.id_team]);
+=======
+            const isGraded = Boolean(scoreObj?.is_final);
+>>>>>>> adec82d242b5c65b6f3a83d61d1dfcb076107ac2
             const isIndividual = team.tipe_partisipasi === 'Individu' || isCategoryIndividual;
 
             return (
