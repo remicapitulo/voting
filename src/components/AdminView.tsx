@@ -182,13 +182,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [newTeamMotto, setNewTeamMotto] = useState('');
   const [newTeamLeader, setNewTeamLeader] = useState('');
 
-  // New sub-event form state
+  // New & Edit sub-event form state
   const [newSubEventName, setNewSubEventName] = useState('');
   const [newSubEventCode, setNewSubEventCode] = useState('');
   const [newSubEventDesc, setNewSubEventDesc] = useState('');
   const [newSubEventYear, setNewSubEventYear] = useState('2026');
   const [newSubEventType, setNewSubEventType] = useState<EventParticipantType>('Group');
   const [newSubEventDeadline, setNewSubEventDeadline] = useState('2026-11-30T23:59');
+  const [editingSubEvent, setEditingSubEvent] = useState<EventModel | null>(null);
+  const [subEventToDelete, setSubEventToDelete] = useState<EventModel | null>(null);
+  const [isSavingSubEvent, setIsSavingSubEvent] = useState(false);
+  const [isDeletingSubEvent, setIsDeletingSubEvent] = useState(false);
 
   // Deadline editing state per subevent: subeventId -> local ISO string
   const [deadlinesDraft, setDeadlinesDraft] = useState<Record<string, string>>(() => {
@@ -365,28 +369,116 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleCreateSubEvent = (e: React.FormEvent) => {
+  const handleOpenAddSubEventModal = () => {
+    setEditingSubEvent(null);
+    setNewSubEventName('');
+    setNewSubEventCode('');
+    setNewSubEventDesc('');
+    setNewSubEventYear(String(new Date().getFullYear()));
+    setNewSubEventType('Group');
+    setNewSubEventDeadline('2026-11-30T23:59');
+    setShowAddSubEventModal(true);
+  };
+
+  const handleOpenEditSubEvent = (ev: EventModel) => {
+    setEditingSubEvent(ev);
+    setNewSubEventName(ev.nama_event || '');
+    setNewSubEventCode(ev.kode_event || '');
+    setNewSubEventDesc(ev.deskripsi || '');
+    setNewSubEventYear(ev.tahun || '2026');
+    setNewSubEventType(ev.tipe_peserta || 'Group');
+    setNewSubEventDeadline(
+      deadlinesDraft[ev.id_event] ||
+      (ev.batas_waktu ? toDateTimeLocalValue(ev.batas_waktu) || ev.batas_waktu.slice(0, 16) : '')
+    );
+    setShowAddSubEventModal(true);
+  };
+
+  const handleCloseSubEventModal = () => {
+    if (isSavingSubEvent) return;
+    setShowAddSubEventModal(false);
+    setEditingSubEvent(null);
+  };
+
+  const handleSaveSubEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newSubEventName || !newSubEventCode) return;
+    if (!newSubEventName.trim() || !newSubEventCode.trim()) return;
 
-    const res = apiService.addEvent({
-      nama_event: newSubEventName.trim(),
-      kode_event: newSubEventCode.trim(),
-      deskripsi: newSubEventDesc.trim() || `Event ${newSubEventName} SMPIT Pondok Duta`,
-      tahun: newSubEventYear.trim() || '2026',
-      status_aktif: true,
-      batas_waktu: newSubEventDeadline,
-      tipe_peserta: newSubEventType
-    });
+    setIsSavingSubEvent(true);
+    try {
+      if (editingSubEvent) {
+        const updatedEvent: EventModel = {
+          ...editingSubEvent,
+          nama_event: newSubEventName.trim(),
+          kode_event: newSubEventCode.trim(),
+          deskripsi: newSubEventDesc.trim() || `Event ${newSubEventName.trim()} SMPIT Pondok Duta`,
+          tahun: newSubEventYear.trim() || '2026',
+          batas_waktu: newSubEventDeadline,
+          tipe_peserta: newSubEventType
+        };
+        const res = await apiService.updateEvent(updatedEvent);
+        if (res.success) {
+          if (newSubEventDeadline) {
+            setDeadlinesDraft(prev => ({ ...prev, [updatedEvent.id_event]: newSubEventDeadline }));
+          }
+          setBannerMsg({ type: 'success', text: res.message });
+          setShowAddSubEventModal(false);
+          setEditingSubEvent(null);
+          await onRefreshData();
+          setTimeout(() => setBannerMsg(null), 3500);
+        } else {
+          setBannerMsg({ type: 'error', text: res.message });
+        }
+      } else {
+        const res = apiService.addEvent({
+          nama_event: newSubEventName.trim(),
+          kode_event: newSubEventCode.trim(),
+          deskripsi: newSubEventDesc.trim() || `Event ${newSubEventName.trim()} SMPIT Pondok Duta`,
+          tahun: newSubEventYear.trim() || '2026',
+          status_aktif: true,
+          batas_waktu: newSubEventDeadline,
+          tipe_peserta: newSubEventType
+        });
 
-    if (res.success) {
-      setBannerMsg({ type: 'success', text: res.message });
-      setShowAddSubEventModal(false);
-      setNewSubEventName('');
-      setNewSubEventCode('');
-      setNewSubEventDesc('');
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3500);
+        if (res.success) {
+          if (res.event && newSubEventDeadline) {
+            setDeadlinesDraft(prev => ({ ...prev, [res.event.id_event]: newSubEventDeadline }));
+          }
+          setBannerMsg({ type: 'success', text: res.message });
+          setShowAddSubEventModal(false);
+          setNewSubEventName('');
+          setNewSubEventCode('');
+          setNewSubEventDesc('');
+          await onRefreshData();
+          setTimeout(() => setBannerMsg(null), 3500);
+        }
+      }
+    } finally {
+      setIsSavingSubEvent(false);
+    }
+  };
+
+  const handleConfirmDeleteSubEvent = async () => {
+    if (!subEventToDelete || isDeletingSubEvent) return;
+    setIsDeletingSubEvent(true);
+    try {
+      const targetId = subEventToDelete.id_event;
+      const res = await apiService.deleteEvent(targetId);
+      if (res.success) {
+        if (selectedAdminSubEventId === targetId && res.fallbackEventId) {
+          setSelectedAdminSubEventId(res.fallbackEventId);
+          if (onSelectEvent) onSelectEvent(res.fallbackEventId);
+        }
+        setBannerMsg({ type: 'success', text: res.message });
+        setSubEventToDelete(null);
+        await onRefreshData();
+        setTimeout(() => setBannerMsg(null), 3500);
+      } else {
+        setBannerMsg({ type: 'error', text: res.message });
+        setTimeout(() => setBannerMsg(null), 4000);
+      }
+    } finally {
+      setIsDeletingSubEvent(false);
     }
   };
 
@@ -1145,77 +1237,77 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex flex-wrap gap-2 mt-6 pt-5 border-t border-slate-100">
+        {/* Navigation Tabs: Event, Cabang Lomba, Kalkulasi, Tabulasi, Rekap Voting, Peserta & Akun Juri */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-6 pt-5 border-t border-slate-100">
           <button
             onClick={() => setActiveTab('subevent')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'subevent'
                 ? 'bg-emerald-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Calendar className="w-4 h-4" />
-            <span>Event & Batas Waktu</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('kalkulasi')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
-              activeTab === 'kalkulasi'
-                ? 'bg-emerald-900 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-            }`}
-          >
-            <Award className="w-4 h-4 text-amber-400" />
-            <span>Kalkulasi & Rekapitulasi</span>
+            <Calendar className="w-4 h-4 shrink-0" />
+            <span>Event</span>
           </button>
 
           <button
             onClick={() => setActiveTab('aturan')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'aturan'
                 ? 'bg-emerald-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Settings className="w-4 h-4 text-emerald-400" />
-            <span>Cabang Lomba & Aturan</span>
+            <Settings className={`w-4 h-4 shrink-0 ${activeTab === 'aturan' ? 'text-emerald-300' : 'text-emerald-700'}`} />
+            <span>Cabang Lomba</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('kalkulasi')}
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+              activeTab === 'kalkulasi'
+                ? 'bg-emerald-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+            }`}
+          >
+            <Award className={`w-4 h-4 shrink-0 ${activeTab === 'kalkulasi' ? 'text-amber-300' : 'text-amber-600'}`} />
+            <span>Kalkulasi</span>
           </button>
 
           <button
             onClick={() => setActiveTab('tabulasi')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'tabulasi'
                 ? 'bg-emerald-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Award className="w-4 h-4" />
-            <span>Tabulasi Dewan Juri</span>
+            <Table className="w-4 h-4 shrink-0" />
+            <span>Tabulasi</span>
           </button>
 
           <button
             onClick={() => setActiveTab('voting')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'voting'
                 ? 'bg-emerald-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Vote className="w-4 h-4" />
-            <span>Rekap Voting Publik</span>
+            <Vote className="w-4 h-4 shrink-0" />
+            <span>Rekap Voting</span>
           </button>
 
           <button
             onClick={() => setActiveTab('manajemen')}
-            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+            className={`px-3.5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
               activeTab === 'manajemen'
                 ? 'bg-emerald-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
-            <Users className="w-4 h-4" />
+            <Users className="w-4 h-4 shrink-0" />
             <span>Peserta & Akun Juri</span>
           </button>
         </div>
@@ -1226,20 +1318,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'subevent' && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Pilih & Atur Event (Status Buka / Kunci & Batas Waktu)
-              </h3>
-              <p className="text-xs text-slate-500">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-slate-900">
+                  Pilih & Atur Event (Status Buka / Kunci & Batas Waktu)
+                </h3>
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200">
+                  {availableEvents.length} Event
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
                 Aturan Tampilan Pemilih Bebas: Event yang <strong>DIKUNCI</strong> otomatis di-<strong>HIDE</strong> dari menu. Jika <strong>batas waktu habis namun belum dikunci</strong>, event tetap muncul di menu dengan status <strong>Close</strong> (voting dinonaktifkan).
               </p>
             </div>
             <button
-              onClick={() => setShowAddSubEventModal(true)}
-              className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 self-start sm:self-auto shadow-xs"
+              type="button"
+              onClick={handleOpenAddSubEventModal}
+              className="shrink-0 whitespace-nowrap px-4 py-2.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl inline-flex items-center justify-center gap-2 self-start md:self-center shadow-sm transition-colors cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0 text-amber-300" />
               <span>Tambah Event</span>
             </button>
           </div>
@@ -1383,12 +1481,43 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     {!isOfficialActive && (
                       <button
                         onClick={() => handleActivateSubEvent(ev.id_event)}
-                        className="w-full py-2 px-3 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs"
+                        className="w-full py-2 px-3 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                       >
                         <Calendar className="w-3.5 h-3.5 text-amber-300" />
                         <span>Buka & Jadikan Event Utama</span>
                       </button>
                     )}
+
+                    {/* Edit & Hapus Event Controls */}
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditSubEvent(ev)}
+                        className="py-2 px-3 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 hover:border-emerald-300 border border-slate-200 rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        title={`Edit detail event ${ev.nama_event}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                        <span>Edit Event</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={availableEvents.length <= 1}
+                        onClick={() => setSubEventToDelete(ev)}
+                        className={`py-2 px-3 text-xs font-bold rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${
+                          availableEvents.length <= 1
+                            ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                            : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50 hover:border-rose-300 cursor-pointer'
+                        }`}
+                        title={
+                          availableEvents.length <= 1
+                            ? 'Minimal harus ada 1 event di sistem'
+                            : `Hapus event ${ev.nama_event}`
+                        }
+                      >
+                        <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>Hapus</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -3879,100 +4008,203 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
-      {/* Modal Tambah Sub-Event Baru */}
+      {/* Modal Tambah / Edit Event */}
       {showAddSubEventModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-xl shadow-2xl border border-slate-100 p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900">Tambah Event Baru</h3>
-            <p className="text-xs text-slate-500">
-              Buat agenda acara baru sekolah seperti PHBI, PHBN, Class Meeting, atau Milad Sekolah.
-            </p>
-            <form onSubmit={handleCreateSubEvent} className="space-y-3 text-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="px-5 py-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 text-white flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-xl bg-emerald-800/80 border border-emerald-700/60 flex items-center justify-center text-amber-300 shrink-0 shadow-xs">
+                  {editingSubEvent ? <Edit2 className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-white leading-tight truncate">
+                    {editingSubEvent ? 'Edit Data Event' : 'Tambah Event Baru'}
+                  </h3>
+                  <p className="text-[11px] text-emerald-200/90 mt-0.5 truncate">
+                    {editingSubEvent
+                      ? `Perbarui informasi untuk ${editingSubEvent.kode_event || editingSubEvent.nama_event}`
+                      : 'Buat agenda kegiatan sekolah (PHBI, PHBN, Class Meeting, dll.)'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseSubEventModal}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-emerald-200 hover:text-white transition-colors shrink-0 cursor-pointer"
+                aria-label="Tutup modal event"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveSubEvent} className="p-5 space-y-4 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nama Event *</label>
+                <label className="block font-bold text-slate-700 mb-1.5">Nama Event *</label>
                 <input
                   type="text"
                   required
                   placeholder="Contoh: PHBI - Isra Mi'raj 1448 H"
                   value={newSubEventName}
                   onChange={(e) => setNewSubEventName(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition-colors"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Kode Singkat *</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">Kode Singkat *</label>
                   <input
                     type="text"
                     required
                     placeholder="Contoh: PHBI / PHBN"
                     value={newSubEventCode}
                     onChange={(e) => setNewSubEventCode(e.target.value)}
-                    className="w-full p-2.5 rounded-lg border border-slate-300"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition-colors"
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Tahun Ajaran</label>
+                  <label className="block font-bold text-slate-700 mb-1.5">Tahun</label>
                   <input
                     type="text"
+                    placeholder="2026"
                     value={newSubEventYear}
                     onChange={(e) => setNewSubEventYear(e.target.value)}
-                    className="w-full p-2.5 rounded-lg border border-slate-300"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1.5">Tipe Peserta Acara *</label>
+                  <select
+                    value={newSubEventType}
+                    onChange={(e) => setNewSubEventType(e.target.value as EventParticipantType)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition-colors"
+                  >
+                    <option value="Group">Group / Regu Saja</option>
+                    <option value="Individu">Perorangan / Individu Saja</option>
+                    <option value="Campuran">Campuran (Group & Individu)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1.5">Batas Waktu Vote & Juri</label>
+                  <input
+                    type="datetime-local"
+                    value={newSubEventDeadline}
+                    onChange={(e) => setNewSubEventDeadline(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 font-mono transition-colors"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Tipe Peserta Acara *</label>
-                <select
-                  value={newSubEventType}
-                  onChange={(e) => setNewSubEventType(e.target.value as any)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
-                >
-                  <option value="Group">Group / Regu Saja</option>
-                  <option value="Individu">Perorangan / Individu Saja</option>
-                  <option value="Campuran">Campuran (Ada Group & Ada Individu)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Batas Waktu Vote & Penjurian</label>
-                <input
-                  type="datetime-local"
-                  value={newSubEventDeadline}
-                  onChange={(e) => setNewSubEventDeadline(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Deskripsi Singkat Acara</label>
+                <label className="block font-bold text-slate-700 mb-1.5">Deskripsi Singkat Acara</label>
                 <textarea
-                  rows={2}
+                  rows={3}
                   placeholder="Jelaskan tujuan dan tema perhelatan kegiatan..."
                   value={newSubEventDesc}
                   onChange={(e) => setNewSubEventDesc(e.target.value)}
-                  className="w-full p-2.5 rounded-lg border border-slate-300"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50/40 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition-colors resize-none"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddSubEventModal(false)}
-                  className="px-4 py-2 font-semibold text-slate-600 hover:bg-slate-100 rounded-lg"
+                  disabled={isSavingSubEvent}
+                  onClick={handleCloseSubEventModal}
+                  className="px-4 py-2.5 font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg"
+                  disabled={isSavingSubEvent}
+                  className="px-5 py-2.5 font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-xl shadow-sm inline-flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
                 >
-                  Buat Event
+                  {isSavingSubEvent ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-amber-300" />
+                      <span>{editingSubEvent ? 'Simpan Perubahan' : 'Buat Event'}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Hapus Event */}
+      {subEventToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base font-bold text-slate-900">Hapus Event Ini?</h3>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Anda akan menghapus event{' '}
+                    <strong className="text-slate-900">{subEventToDelete.nama_event}</strong>{' '}
+                    ({subEventToDelete.kode_event || subEventToDelete.id_event}) dari daftar event dan database Google Sheets.
+                  </p>
+                </div>
+              </div>
+
+              {(() => {
+                const catCount = categories.filter(c => c.id_event === subEventToDelete.id_event).length;
+                const teamCount = teams.filter(t => t.id_event === subEventToDelete.id_event).length;
+                if (catCount === 0 && teamCount === 0) return null;
+                return (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                    Event ini terhubung dengan <strong>{catCount} cabang lomba</strong> dan{' '}
+                    <strong>{teamCount} peserta</strong>. Pastikan Anda benar-benar ingin menghapus event ini.
+                  </div>
+                );
+              })()}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 text-xs">
+                <button
+                  type="button"
+                  disabled={isDeletingSubEvent}
+                  onClick={() => setSubEventToDelete(null)}
+                  className="px-4 py-2.5 font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingSubEvent}
+                  onClick={handleConfirmDeleteSubEvent}
+                  className="px-4 py-2.5 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {isDeletingSubEvent ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menghapus...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Ya, Hapus Event</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

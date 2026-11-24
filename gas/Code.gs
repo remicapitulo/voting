@@ -1162,9 +1162,21 @@ function handleManageEvent(data) {
     sheet = ss.getSheetByName(SHEETS.EVENTS);
   }
 
-  var idEvent = data.id_event || ('event-' + new Date().getTime());
+  ensureHeaderExists(sheet, 'tipe_peserta');
+
+  var idEvent = String(data.id_event || ('event-' + new Date().getTime())).trim();
   var op = data.operation || 'create';
   var rows = sheet.getDataRange().getValues();
+
+  if (op === 'delete') {
+    for (var d = rows.length - 1; d >= 1; d--) {
+      if (String(rows[d][0]).trim() === idEvent) {
+        sheet.deleteRow(d + 1);
+        return { status: 'success', message: 'Event berhasil dihapus dari database Google Sheets.' };
+      }
+    }
+    return { status: 'error', message: 'Event tidak ditemukan di sheet Events.' };
+  }
 
   var eventObj = {
     id_event: idEvent,
@@ -1173,12 +1185,13 @@ function handleManageEvent(data) {
     tahun: data.tahun || '2026',
     status_aktif: data.status_aktif !== undefined ? data.status_aktif : true,
     batas_waktu: data.batas_waktu || '',
-    deskripsi: data.deskripsi || ''
+    deskripsi: data.deskripsi || '',
+    tipe_peserta: data.tipe_peserta || 'Group'
   };
 
   if (op === 'update') {
     for (var i = 1; i < rows.length; i++) {
-      if (String(rows[i][0]) === idEvent) {
+      if (String(rows[i][0]).trim() === idEvent) {
         updateRowByHeaders(sheet, i + 1, eventObj);
         return { status: 'success', message: 'Event berhasil diperbarui' };
       }

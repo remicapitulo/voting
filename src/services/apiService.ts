@@ -911,25 +911,86 @@ class ApiService {
     };
   }
 
-  public updateEvent(updated: EventModel): { success: boolean; message: string } {
+  public async updateEvent(updated: EventModel): Promise<{ success: boolean; message: string }> {
     const events = this.getEvents();
     const index = events.findIndex(e => e.id_event === updated.id_event);
-    if (index >= 0) {
-      events[index] = updated;
-      localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events));
-      const currentActive = this.getActiveEvent();
-      if (currentActive.id_event === updated.id_event) {
-        localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(updated));
-      }
-      if (this.gasUrl) {
-        fetch(this.gasUrl, {
+    if (index < 0) {
+      return { success: false, message: 'Event tidak ditemukan.' };
+    }
+
+    events[index] = updated;
+    localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(events));
+    const currentActive = this.getActiveEvent();
+    if (currentActive.id_event === updated.id_event) {
+      localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(updated));
+    }
+
+    let gasSynced = false;
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
           method: 'POST',
           body: JSON.stringify({ action: 'manageEvent', operation: 'update', ...updated })
-        }).catch(console.warn);
+        });
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (json && json.status === 'success') gasSynced = true;
+        }
+      } catch (err) {
+        console.warn('Failed to sync updated event to GAS:', err);
       }
-      return { success: true, message: `Event "${updated.nama_event}" berhasil diperbarui.` };
     }
-    return { success: false, message: 'Event tidak ditemukan.' };
+
+    return {
+      success: true,
+      message: gasSynced
+        ? `Event "${updated.nama_event}" berhasil diperbarui di database Google Sheets.`
+        : `Event "${updated.nama_event}" berhasil diperbarui.`
+    };
+  }
+
+  public async deleteEvent(id_event: string): Promise<{ success: boolean; message: string; fallbackEventId?: string }> {
+    const events = this.getEvents();
+    const target = events.find(e => e.id_event === id_event);
+    if (!target) {
+      return { success: false, message: 'Event tidak ditemukan.' };
+    }
+    if (events.length <= 1) {
+      return { success: false, message: 'Minimal harus ada 1 event yang tersisa di sistem.' };
+    }
+
+    const remaining = events.filter(e => e.id_event !== id_event);
+    localStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(remaining));
+
+    const nextActive = remaining.find(e => e.status_aktif) || remaining[0];
+    const currentActive = this.getActiveEvent();
+    if (currentActive.id_event === id_event && nextActive) {
+      localStorage.setItem(STORAGE_KEYS.EVENT, JSON.stringify(nextActive));
+    }
+
+    let gasDeleted = false;
+    if (this.gasUrl) {
+      try {
+        const res = await fetch(this.gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'manageEvent', operation: 'delete', id_event })
+        });
+        if (res.ok) {
+          const json = await res.json().catch(() => null);
+          if (json && json.status === 'success') gasDeleted = true;
+        }
+      } catch (err) {
+        console.warn('Failed to delete event from GAS:', err);
+      }
+    }
+
+    return {
+      success: true,
+      fallbackEventId: nextActive?.id_event,
+      message: gasDeleted
+        ? `Event "${target.nama_event}" berhasil dihapus dari database Google Sheets.`
+        : `Event "${target.nama_event}" berhasil dihapus.`
+    };
   }
 
   public isEventExpired(eventOrId?: EventModel | string): boolean {
