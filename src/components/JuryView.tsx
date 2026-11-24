@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { EventModel, CategoryModel, TeamModel, User, JuryScore } from '../types';
 import { apiService, getFallbackCriteria } from '../services/apiService';
 import {
@@ -127,8 +127,8 @@ export const JuryView: React.FC<JuryViewProps> = ({
     }
   }, [selectedSubEventId, subEventCategories]);
 
-  // Teams belonging to the current sub-event
-  const subEventTeams = useMemo(() => {
+  // Semua peserta milik sub-event aktif
+  const allSubEventTeams = useMemo(() => {
     const list = teams.filter(t => t.id_event === selectedSubEventId);
     return list.length > 0 ? list : teams;
   }, [teams, selectedSubEventId]);
@@ -172,43 +172,58 @@ export const JuryView: React.FC<JuryViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // State untuk tombol nilai cepat (1 - 5) langsung di kartu saat kriteria 1 s/d 3 pertanyaan
+  const [quickSavingTeamIds, setQuickSavingTeamIds] = useState<Record<string, boolean>>({});
+  const [quickSavedTeamIds, setQuickSavedTeamIds] = useState<Record<string, boolean>>({});
+  const [optimisticQuickScores, setOptimisticQuickScores] = useState<Record<string, Record<string, number>>>({});
+
+  // Refs untuk menyimpan skor terbaru secara sinkron & mencegah race condition saat klik cepat antar kriteria
+  const latestQuickScoresRef = useRef<Record<string, Record<string, number>>>({});
+  const inFlightQuickSaveRef = useRef<Record<string, boolean>>({});
+  const queuedQuickSaveRef = useRef<Record<string, { team: TeamModel; categoryId: string; scores: Record<string, number>; note: string }>>({});
+
+  useEffect(() => {
+    setOptimisticQuickScores({});
+    setQuickSavedTeamIds({});
+    latestQuickScoresRef.current = {};
+    queuedQuickSaveRef.current = {};
+  }, [selectedCategoryId, selectedSubEventId]);
+
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
 
-  // If not logged in or not a jury/admin, show prompt
-  if (!currentUser || (currentUser.role !== 'juri' && currentUser.role !== 'admin')) {
-    return (
-      <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
-        <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Award className="w-7 h-7" />
-        </div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Akses Eksklusif Dewan Juri</h2>
-        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
-          Halaman penilaian ini khusus diperuntukkan bagi Dewan Juri resmi yang telah ditugaskan oleh Admin Panitia SMPIT Pondok Duta.
-        </p>
-        <button
-          onClick={onOpenAuth}
-          className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-        >
-          Masuk sebagai Dewan Juri
-        </button>
-      </div>
-    );
-  }
+  const activeCriteriaList = useMemo(() => {
+    return (activeCategory?.kriteria || []).map(k => String(k || '').trim()).filter(Boolean);
+  }, [activeCategory]);
+
+  // Penilaian cepat langsung di kartu aktif untuk 1 sampai 3 kriteria; lebih dari 3 kriteria menggunakan pop-up
+  const isQuickScoreMode = activeCriteriaList.length >= 1 && activeCriteriaList.length <= 3;
+
+  const isCategoryIndividual = activeCategory?.tipe_peserta === 'Individu';
+
+  // Peserta yang sesuai dengan jenis cabang lomba aktif (Individu vs Group/Regu)
+  const subEventTeams = useMemo(() => {
+    const requiredType: 'Group' | 'Individu' = isCategoryIndividual ? 'Individu' : 'Group';
+    return allSubEventTeams.filter(t => (t.tipe_partisipasi || 'Group') === requiredType);
+  }, [allSubEventTeams, isCategoryIndividual]);
 
   // Get all scores given by this specific jury for the current category
-  const myCategoryScores = juryScores.filter(
-    s => s.id_jury === currentUser.id && s.id_kategori === selectedCategoryId
-  );
+  const myCategoryScores = useMemo(() => {
+    if (!currentUser) return [];
+    return juryScores.filter(
+      s => s.id_jury === currentUser.id && s.id_kategori === selectedCategoryId
+    );
+  }, [juryScores, currentUser, selectedCategoryId]);
 
   const isAssignedToActiveCategory = useMemo(() => {
     if (!currentUser || currentUser.role === 'admin') return true;
-    if (!activeCategory.assigned_juries || activeCategory.assigned_juries.length === 0) return true;
+    if (!activeCategory?.assigned_juries || activeCategory.assigned_juries.length === 0) return true;
     return activeCategory.assigned_juries.includes(currentUser.id) ||
            activeCategory.assigned_juries.includes(currentUser.username);
   }, [activeCategory, currentUser]);
 
+  const validTeamIdSet = useMemo(() => new Set(subEventTeams.map(t => t.id_team)), [subEventTeams]);
   const totalTeams = subEventTeams.length;
-  const gradedTeamsCount = myCategoryScores.filter(s => s.is_final).length;
+  const gradedTeamsCount = myCategoryScores.filter(s => s.is_final && validTeamIdSet.has(s.id_team)).length;
   const progressPercent = totalTeams > 0 ? Math.round((gradedTeamsCount / totalTeams) * 100) : 0;
 
   // Filter and sort teams A-Z
@@ -242,10 +257,32 @@ export const JuryView: React.FC<JuryViewProps> = ({
       });
   }, [subEventTeams, searchQuery, statusFilter, sortOrder, myCategoryScores]);
 
+  // If not logged in or not a jury/admin, show prompt
+  if (!currentUser || (currentUser.role !== 'juri' && currentUser.role !== 'admin')) {
+    return (
+      <div className="max-w-2xl mx-auto my-12 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center">
+        <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
+          <Award className="w-7 h-7" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Akses Eksklusif Dewan Juri</h2>
+        <p className="text-sm text-slate-500 mb-6 leading-relaxed">
+          Halaman penilaian ini khusus diperuntukkan bagi Dewan Juri resmi yang telah ditugaskan oleh Admin Panitia SMPIT Pondok Duta.
+        </p>
+        <button
+          onClick={onOpenAuth}
+          className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+        >
+          Masuk sebagai Dewan Juri
+        </button>
+      </div>
+    );
+  }
+
   // Open scoring panel for a team
   const handleOpenScoring = (team: TeamModel) => {
     setActiveTeamForScoring(team);
     const existingScore = myCategoryScores.find(s => s.id_team === team.id_team);
+    const optimisticMap = latestQuickScoresRef.current[team.id_team] || optimisticQuickScores[team.id_team] || {};
 
     const activeCriteria = (activeCategory?.kriteria && activeCategory.kriteria.length > 0)
       ? activeCategory.kriteria
@@ -253,8 +290,13 @@ export const JuryView: React.FC<JuryViewProps> = ({
 
     const initialMap: Record<string, number> = {};
     activeCriteria.forEach(k => {
-      if (existingScore && existingScore.kriteria_scores[k] !== undefined) {
+      const trimmedKey = String(k || '').trim();
+      if (optimisticMap[trimmedKey] !== undefined) {
+        initialMap[k] = optimisticMap[trimmedKey];
+      } else if (existingScore && existingScore.kriteria_scores[k] !== undefined) {
         initialMap[k] = existingScore.kriteria_scores[k];
+      } else if (existingScore && existingScore.kriteria_scores[trimmedKey] !== undefined) {
+        initialMap[k] = existingScore.kriteria_scores[trimmedKey];
       } else {
         initialMap[k] = 4; // Default standard score 4.0
       }
@@ -269,6 +311,133 @@ export const JuryView: React.FC<JuryViewProps> = ({
       ...prev,
       [criterion]: scoreVal
     }));
+  };
+
+  const flushQuickSave = async (
+    team: TeamModel,
+    categoryId: string,
+    scoresSnapshot: Record<string, number>,
+    existingNote: string
+  ) => {
+    if (!currentUser) return;
+
+    if (inFlightQuickSaveRef.current[team.id_team]) {
+      queuedQuickSaveRef.current[team.id_team] = {
+        team,
+        categoryId,
+        scores: scoresSnapshot,
+        note: existingNote
+      };
+      return;
+    }
+
+    inFlightQuickSaveRef.current[team.id_team] = true;
+    setQuickSavingTeamIds(prev => ({ ...prev, [team.id_team]: true }));
+
+    try {
+      const res = await apiService.submitJuryScore(
+        currentUser.id,
+        currentUser.nama,
+        team.id_team,
+        categoryId,
+        scoresSnapshot,
+        existingNote,
+        true
+      );
+
+      if (res.success) {
+        onRefreshData();
+        const vals = Object.values(scoresSnapshot);
+        const avg = vals.length > 0
+          ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)
+          : '0.00';
+        setQuickSavedTeamIds(prev => ({ ...prev, [team.id_team]: true }));
+        setFeedback({
+          type: 'success',
+          message: vals.length === 1
+            ? `Nilai ${vals[0]}/5 untuk ${team.nama_regu} berhasil disimpan otomatis ke database.`
+            : `Nilai rata-rata ${avg}/5 (${vals.length} kriteria) untuk ${team.nama_regu} berhasil disimpan otomatis ke database.`
+        });
+        setTimeout(() => {
+          setQuickSavedTeamIds(prev => {
+            const copy = { ...prev };
+            delete copy[team.id_team];
+            return copy;
+          });
+        }, 2000);
+      } else {
+        setFeedback({ type: 'error', message: res.message || 'Gagal menyimpan nilai cepat.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.message || 'Gagal menyimpan nilai cepat.' });
+    } finally {
+      const nextQueued = queuedQuickSaveRef.current[team.id_team];
+      if (nextQueued) {
+        delete queuedQuickSaveRef.current[team.id_team];
+        inFlightQuickSaveRef.current[team.id_team] = false;
+        void flushQuickSave(nextQueued.team, nextQueued.categoryId, nextQueued.scores, nextQueued.note);
+      } else {
+        inFlightQuickSaveRef.current[team.id_team] = false;
+        setQuickSavingTeamIds(prev => {
+          const copy = { ...prev };
+          delete copy[team.id_team];
+          return copy;
+        });
+        setTimeout(() => setFeedback(null), 3500);
+      }
+    }
+  };
+
+  const handleQuickScore = (team: TeamModel, criterionName: string, scoreVal: number) => {
+    if (!currentUser || !isQuickScoreMode || !criterionName) return;
+
+    if (!isAssignedToActiveCategory) {
+      setFeedback({
+        type: 'error',
+        message: 'Anda tidak ditugaskan sebagai juri penilai pada cabang lomba ini.'
+      });
+      setTimeout(() => setFeedback(null), 3500);
+      return;
+    }
+
+    if (isSubEventClosed) {
+      setFeedback({
+        type: 'error',
+        message: closedStatus.reason === 'not_active'
+          ? 'Gagal menyimpan: Event sedang ditutup oleh panitia.'
+          : 'Gagal menyimpan: Batas waktu penilaian telah berakhir dan sistem terkunci.'
+      });
+      setTimeout(() => setFeedback(null), 3500);
+      return;
+    }
+
+    const existingScore = myCategoryScores.find(s => s.id_team === team.id_team);
+    const existingNote = existingScore?.catatan || '';
+    const savedMap = existingScore?.kriteria_scores || {};
+    const prevOptimistic = latestQuickScoresRef.current[team.id_team] || {};
+
+    // Gabungkan nilai tersimpan + pilihan cepat terbaru hanya untuk kriteria aktif
+    const mergedScores: Record<string, number> = {};
+    activeCriteriaList.forEach(c => {
+      if (prevOptimistic[c] !== undefined) {
+        mergedScores[c] = prevOptimistic[c];
+      } else if (savedMap[c] !== undefined) {
+        mergedScores[c] = savedMap[c];
+      }
+    });
+    mergedScores[criterionName] = scoreVal;
+
+    latestQuickScoresRef.current[team.id_team] = mergedScores;
+    setOptimisticQuickScores(prev => ({
+      ...prev,
+      [team.id_team]: mergedScores
+    }));
+
+    // Simpan otomatis ke database begitu seluruh kriteria pada kartu (1-3 kriteria) telah terisi
+    const isComplete = activeCriteriaList.every(c => mergedScores[c] !== undefined);
+    if (isComplete) {
+      void flushQuickSave(team, selectedCategoryId, { ...mergedScores }, existingNote);
+    }
   };
 
   const calculateLiveAverage = () => {
@@ -304,6 +473,14 @@ export const JuryView: React.FC<JuryViewProps> = ({
       );
 
       if (res.success) {
+        const savedTeamId = activeTeamForScoring.id_team;
+        delete latestQuickScoresRef.current[savedTeamId];
+        setOptimisticQuickScores(prev => {
+          if (prev[savedTeamId] === undefined) return prev;
+          const copy = { ...prev };
+          delete copy[savedTeamId];
+          return copy;
+        });
         setFeedback({ type: 'success', message: res.message });
         setActiveTeamForScoring(null);
         onRefreshData();
@@ -440,7 +617,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
                 ></div>
               </div>
               <div className="text-[10px] text-slate-500 mt-1">
-                {currentSubEvent.tipe_peserta === 'Individu' ? 'Peserta' : 'Regu'} dalam kategori aktif
+                {isCategoryIndividual ? 'Peserta Individu' : 'Regu'} dalam kategori aktif
               </div>
             </div>
 
@@ -477,8 +654,11 @@ export const JuryView: React.FC<JuryViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
             {subEventCategories.map(c => {
               const isSelected = c.id_kategori === selectedCategoryId;
+              const catReqType: 'Group' | 'Individu' = c.tipe_peserta === 'Individu' ? 'Individu' : 'Group';
+              const catMatchingTeams = allSubEventTeams.filter(t => (t.tipe_partisipasi || 'Group') === catReqType);
+              const catTeamIds = new Set(catMatchingTeams.map(t => t.id_team));
               const countGradedInCat = juryScores.filter(
-                s => s.id_jury === currentUser.id && s.id_kategori === c.id_kategori && s.is_final
+                s => s.id_jury === currentUser.id && s.id_kategori === c.id_kategori && s.is_final && catTeamIds.has(s.id_team)
               ).length;
               const isAssigned = (!c.assigned_juries || c.assigned_juries.length === 0)
                 ? true
@@ -500,15 +680,16 @@ export const JuryView: React.FC<JuryViewProps> = ({
                   }`}
                 >
                   <div className="truncate pr-2">
-                    <span className="truncate">{c.nama_kategori}</span>
-                    {!isAssigned && (
-                      <span className="text-[10px] text-amber-500 font-normal block">Bukan Penilai</span>
-                    )}
+                    <span className="truncate block">{c.nama_kategori}</span>
+                    <span className={`text-[10px] font-normal block ${isSelected ? 'text-emerald-200' : 'text-slate-500'}`}>
+                      {catReqType === 'Individu' ? 'Individu' : 'Group / Regu'}
+                      {!isAssigned ? ' · Bukan Penilai' : ''}
+                    </span>
                   </div>
                   <span className={`text-[11px] font-mono tabular-nums px-2 py-0.5 rounded shrink-0 ${
                     isSelected ? 'bg-emerald-800 text-amber-300' : 'bg-slate-200 text-slate-600'
                   }`}>
-                    {countGradedInCat}/{subEventTeams.length}
+                    {countGradedInCat}/{catMatchingTeams.length}
                   </span>
                 </button>
               );
@@ -600,7 +781,7 @@ export const JuryView: React.FC<JuryViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`Cari nama ${currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'}, pangkalan, atau kelas...`}
+              placeholder={`Cari nama ${isCategoryIndividual ? 'peserta' : 'regu'}, pangkalan, atau kelas...`}
               className="w-full pl-9 pr-8 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-700 bg-slate-50/50"
             />
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -654,19 +835,44 @@ export const JuryView: React.FC<JuryViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
-          <span>
-            Menampilkan <strong>{processedTeams.length}</strong> {currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'} (Urut A-Z) · Form memuat{' '}
-            <strong className="text-emerald-800">{activeCategory?.kriteria?.length || 0} kriteria pertanyaan</strong>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+          <span className="flex flex-wrap items-center gap-1.5">
+            <span>
+              Menampilkan <strong>{processedTeams.length}</strong> {isCategoryIndividual ? 'peserta' : 'regu'} (Urut {sortOrder === 'asc' ? 'A-Z' : 'Z-A'}) · Form memuat{' '}
+              <strong className="text-emerald-800">{activeCategory?.kriteria?.length || 0} kriteria pertanyaan</strong>
+            </span>
+            {isQuickScoreMode && (
+              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-[10px]">
+                Mode Nilai Cepat 1–5 Aktif ({activeCriteriaList.length} Kriteria)
+              </span>
+            )}
           </span>
           <span className="text-slate-400">Skala Penilaian: 1 (Kurang) s/d 5 (Istimewa)</span>
         </div>
       </div>
 
       {/* Main Grid: Teams List to Grade */}
-      {processedTeams.length === 0 ? (
+      {subEventTeams.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center space-y-2">
+          <div className="w-11 h-11 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+            {isCategoryIndividual ? <UserIcon className="w-5 h-5" /> : <Users className="w-5 h-5" />}
+          </div>
+          <p className="text-sm font-bold text-slate-800">
+            {isCategoryIndividual
+              ? `Belum ada peserta individu terdaftar untuk cabang "${activeCategory?.nama_kategori}".`
+              : `Belum ada regu/group terdaftar untuk cabang "${activeCategory?.nama_kategori}".`}
+          </p>
+          <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+            {isCategoryIndividual
+              ? 'Cabang lomba bertipe Individu hanya menampilkan nama-nama peserta perorangan (bukan regu/group). Admin dapat menambahkan peserta bertipe Individu melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'
+              : 'Admin dapat menambahkan regu/group melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'}
+          </p>
+        </div>
+      ) : processedTeams.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-8 text-center">
-          <p className="text-sm font-semibold text-slate-700">Tidak ada peserta yang cocok dengan kriteria pencarian.</p>
+          <p className="text-sm font-semibold text-slate-700">
+            Tidak ada {isCategoryIndividual ? 'peserta' : 'regu'} yang cocok dengan kriteria pencarian.
+          </p>
           <button
             onClick={() => {
               setSearchQuery('');
@@ -681,13 +887,43 @@ export const JuryView: React.FC<JuryViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {processedTeams.map(team => {
             const scoreObj = myCategoryScores.find(s => s.id_team === team.id_team);
-            const isGraded = Boolean(scoreObj?.is_final);
-            const isIndividual = team.tipe_partisipasi === 'Individu';
+            const savedCriteriaMap = scoreObj?.kriteria_scores || {};
+            const optimisticMap = optimisticQuickScores[team.id_team] || {};
+
+            const mergedCriteriaScores: Record<string, number> = {};
+            if (isQuickScoreMode) {
+              activeCriteriaList.forEach(c => {
+                if (optimisticMap[c] !== undefined) {
+                  mergedCriteriaScores[c] = optimisticMap[c];
+                } else if (savedCriteriaMap[c] !== undefined) {
+                  mergedCriteriaScores[c] = savedCriteriaMap[c];
+                }
+              });
+            }
+
+            const filledQuickCount = isQuickScoreMode
+              ? activeCriteriaList.filter(c => mergedCriteriaScores[c] !== undefined).length
+              : 0;
+            const allQuickCriteriaFilled = isQuickScoreMode && filledQuickCount === activeCriteriaList.length;
+
+            let effectiveNumericScore: number | undefined;
+            if (isQuickScoreMode && allQuickCriteriaFilled) {
+              const sum = activeCriteriaList.reduce((acc, c) => acc + mergedCriteriaScores[c], 0);
+              effectiveNumericScore = Number((sum / activeCriteriaList.length).toFixed(2));
+            } else if (scoreObj?.is_final) {
+              effectiveNumericScore = scoreObj.skor_1_to_5;
+            }
+
+            const isGraded = Boolean(scoreObj?.is_final || allQuickCriteriaFilled);
+            const isPartiallyFilled = isQuickScoreMode && !isGraded && filledQuickCount > 0;
+            const isQuickSaving = Boolean(quickSavingTeamIds[team.id_team]);
+            const isQuickJustSaved = Boolean(quickSavedTeamIds[team.id_team]);
+            const isIndividual = team.tipe_partisipasi === 'Individu' || isCategoryIndividual;
 
             return (
               <div
                 key={team.id_team}
-                className={`bg-white rounded-xl border p-5 transition-all flex flex-col justify-between ${
+                className={`bg-white rounded-xl border p-4 transition-all flex flex-col justify-between ${
                   isGraded
                     ? 'border-emerald-200 bg-emerald-50/20 shadow-xs'
                     : 'border-slate-200 hover:border-slate-300 hover:shadow-xs'
@@ -702,19 +938,23 @@ export const JuryView: React.FC<JuryViewProps> = ({
                       </span>
                     </div>
 
-                    {isGraded ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
+                    {isGraded && effectiveNumericScore !== undefined ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Skor {scoreObj?.skor_1_to_5.toFixed(2)}/5</span>
+                        <span>Skor {effectiveNumericScore.toFixed(2)}/5</span>
+                      </span>
+                    ) : isPartiallyFilled ? (
+                      <span className="text-[11px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded border border-amber-300 shrink-0 tabular-nums">
+                        {filledQuickCount}/{activeCriteriaList.length} Terisi
                       </span>
                     ) : (
-                      <span className="text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      <span className="text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shrink-0">
                         Belum Dinilai
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2.5 my-1.5">
+                  <div className="flex items-center gap-2.5 my-1">
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
                       team.kategori_regu === 'Putra'
                         ? 'bg-gradient-to-br from-emerald-800 to-teal-900'
@@ -724,30 +964,19 @@ export const JuryView: React.FC<JuryViewProps> = ({
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-base font-bold text-slate-900 truncate">{team.nama_regu}</h3>
-                      <p className="text-xs text-slate-500">{team.kelas_pangkalan}</p>
+                      <p className="text-xs text-slate-500 truncate">{team.kelas_pangkalan}</p>
                     </div>
                   </div>
-                  
-                  <div className="mt-2 text-xs text-slate-600 italic">
-                    "{team.motto}"
-                  </div>
-
-                  {team.ketua_regu && (
-                    <div className="mt-2 text-[11px] text-slate-500">
-                      <span>{isIndividual ? 'Pembimbing: ' : 'Ketua: '}</span>
-                      <strong className="text-slate-800">{team.ketua_regu}</strong>
-                    </div>
-                  )}
 
                   {scoreObj?.catatan && (
-                    <div className="mt-3 p-2 bg-slate-50 rounded text-xs text-slate-600 border border-slate-100">
+                    <div className="mt-2.5 p-2 bg-slate-50 rounded text-xs text-slate-600 border border-slate-100">
                       <div className="text-[10px] font-bold text-slate-400 uppercase">Catatan Juri:</div>
                       <p className="line-clamp-2">{scoreObj.catatan}</p>
                     </div>
                   )}
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="mt-3 pt-3 border-t border-slate-100">
                   {!isAssignedToActiveCategory ? (
                     <button
                       disabled
@@ -756,10 +985,133 @@ export const JuryView: React.FC<JuryViewProps> = ({
                       <Lock className="w-3.5 h-3.5" />
                       <span>Bukan Juri Penilai</span>
                     </button>
+                  ) : isQuickScoreMode ? (
+                    <div className="space-y-2.5">
+                      {activeCriteriaList.map((criterionName, idx) => {
+                        const selectedVal = mergedCriteriaScores[criterionName];
+                        const isSingle = activeCriteriaList.length === 1;
+
+                        return (
+                          <div key={`${team.id_team}-crit-${idx}`} className="space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span
+                                className="font-semibold text-slate-700 leading-snug line-clamp-1"
+                                title={criterionName}
+                              >
+                                {!isSingle && (
+                                  <span className="text-emerald-800 font-bold mr-1">{idx + 1}.</span>
+                                )}
+                                {criterionName}
+                              </span>
+
+                              {isSingle ? (
+                                <span className="shrink-0 flex items-center gap-1.5">
+                                  {isQuickSaving ? (
+                                    <span className="text-[10px] font-bold text-amber-700">Menyimpan...</span>
+                                  ) : isQuickJustSaved ? (
+                                    <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-0.5">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      <span>Tersimpan</span>
+                                    </span>
+                                  ) : isSubEventClosed ? (
+                                    <span className="text-[10px] font-bold text-rose-600 flex items-center gap-0.5">
+                                      <Lock className="w-3 h-3" />
+                                      <span>Terkunci</span>
+                                    </span>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenScoring(team)}
+                                      className="text-[10px] font-semibold text-slate-400 hover:text-emerald-700 underline cursor-pointer"
+                                      title="Tambah atau ubah catatan juri (opsional)"
+                                    >
+                                      {scoreObj?.catatan ? 'Edit Catatan' : '+ Catatan'}
+                                    </button>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className={`shrink-0 font-mono text-[10px] font-bold px-1.5 py-0.5 rounded tabular-nums ${
+                                  selectedVal !== undefined
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-400'
+                                }`}>
+                                  {selectedVal !== undefined ? `${selectedVal}/5` : '-'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-5 gap-1.5">
+                              {[1, 2, 3, 4, 5].map(num => {
+                                const isSelected = selectedVal !== undefined && Math.round(selectedVal) === num;
+                                return (
+                                  <button
+                                    key={num}
+                                    type="button"
+                                    disabled={isSubEventClosed}
+                                    onClick={() => handleQuickScore(team, criterionName, num)}
+                                    title={`Beri nilai ${num} dari 5 untuk "${criterionName}"`}
+                                    className={`${isSingle ? 'min-h-[40px] py-2' : 'min-h-[34px] py-1.5'} rounded-lg text-sm font-extrabold font-mono transition-all border flex items-center justify-center ${
+                                      isSelected
+                                        ? 'bg-emerald-800 text-white border-emerald-800 shadow-sm ring-2 ring-emerald-500/30'
+                                        : isSubEventClosed
+                                        ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                        : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-emerald-50 hover:border-emerald-500 hover:text-emerald-900 active:scale-95 cursor-pointer'
+                                    }`}
+                                  >
+                                    {num}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {activeCriteriaList.length > 1 && (
+                        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 text-[10px]">
+                          <span className="truncate">
+                            {isQuickSaving ? (
+                              <span className="font-bold text-amber-700">Menyimpan otomatis...</span>
+                            ) : isQuickJustSaved ? (
+                              <span className="font-bold text-emerald-700 inline-flex items-center gap-0.5">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Tersimpan otomatis</span>
+                              </span>
+                            ) : isSubEventClosed ? (
+                              <span className="font-bold text-rose-600 inline-flex items-center gap-0.5">
+                                <Lock className="w-3 h-3" />
+                                <span>Penjurian terkunci</span>
+                              </span>
+                            ) : !allQuickCriteriaFilled ? (
+                              <span className="text-slate-500">
+                                {filledQuickCount === 0
+                                  ? `Isi ${activeCriteriaList.length} kriteria untuk simpan otomatis`
+                                  : `Kurang ${activeCriteriaList.length - filledQuickCount} kriteria lagi untuk simpan`}
+                              </span>
+                            ) : (
+                              <span className="text-emerald-700 font-semibold">
+                                Tersimpan · Klik angka untuk ubah
+                              </span>
+                            )}
+                          </span>
+
+                          {!isSubEventClosed && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenScoring(team)}
+                              className="shrink-0 font-semibold text-slate-400 hover:text-emerald-700 underline cursor-pointer"
+                              title="Tambah atau ubah catatan juri (opsional)"
+                            >
+                              {scoreObj?.catatan ? 'Edit Catatan' : '+ Catatan'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <button
                       onClick={() => handleOpenScoring(team)}
-                      className={`w-full py-2 px-3 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 ${
+                      className={`w-full py-2 px-3 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
                         isGraded
                           ? 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                           : 'bg-emerald-800 text-white hover:bg-emerald-700'

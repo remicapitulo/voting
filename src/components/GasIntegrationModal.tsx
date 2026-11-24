@@ -33,6 +33,7 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'guide' | 'code' | 'schema'>('guide');
+  const [settingUpSheets, setSettingUpSheets] = useState(false);
 
   if (!isOpen) return null;
 
@@ -89,11 +90,28 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
     setTesting(false);
   };
 
+  const handleSetupSheets = async () => {
+    if (!gasUrl.trim()) {
+      setTestResult({ success: false, message: 'Masukkan Web App URL Google Apps Script terlebih dahulu.' });
+      return;
+    }
+    setSettingUpSheets(true);
+    setTestResult(null);
+    apiService.setGasUrl(gasUrl.trim());
+    const res = await apiService.setupDatabaseSheets();
+    setTestResult(res);
+    setSettingUpSheets(false);
+    if (res.success) {
+      onUrlUpdated();
+    }
+  };
+
   const schemas = [
     { name: 'Users', columns: ['id', 'username', 'password', 'nama', 'role', 'emailOrWa', 'jurySpecialty', 'created_at'] },
     { name: 'Events', columns: ['id_event', 'kode_event', 'nama_event', 'tahun', 'status_aktif', 'batas_waktu', 'deskripsi'] },
-    { name: 'Categories', columns: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi', 'assigned_juries', 'live_tiktok', 'live_youtube', 'live_instagram'] },
-    { name: 'Teams', columns: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota'] },
+    { name: 'Categories', columns: ['id_kategori', 'id_event', 'nama_kategori', 'tipe', 'assessment_type', 'tipe_peserta', 'votes_required', 'kriteria', 'deskripsi', 'assigned_juries', 'live_tiktok', 'live_youtube', 'live_instagram', 'voting_start', 'voting_end'] },
+    { name: 'Teams', columns: ['id_team', 'id_event', 'nama_regu', 'kelas_pangkalan', 'kategori_regu', 'foto_url', 'anggota', 'ketua_regu', 'motto', 'tipe_partisipasi'] },
+    { name: 'Peserta_Individu', columns: ['id_peserta', 'id_event', 'nama_peserta', 'kelas_kontingen', 'kategori_gender', 'foto_url', 'pembimbing', 'motto'] },
     { name: 'Jury_Scores', columns: ['id_score', 'id_jury', 'jury_name', 'id_team', 'id_kategori', 'skor_1_to_5', 'catatan', 'kriteria_scores', 'is_final', 'timestamp'] },
     { name: 'Public_Votes', columns: ['id_vote', 'id_voter', 'voter_name', 'id_team', 'id_kategori', 'timestamp'] },
     { name: 'Config', columns: ['key', 'value', 'updated_at'] }
@@ -170,7 +188,7 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-0.5 gap-1">
+          <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-500 pt-0.5 gap-2">
             <span>
               Status Database:{' '}
               {gasUrl ? (
@@ -179,7 +197,18 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
                 <strong className="text-amber-700 font-bold">Lokal Standalone (Offline Aman)</strong>
               )}
             </span>
-            <span className="text-slate-400">Data tersinkron otomatis saat online</span>
+            {gasUrl ? (
+              <button
+                type="button"
+                onClick={handleSetupSheets}
+                disabled={settingUpSheets || testing}
+                className="px-2.5 py-1 text-[11px] font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {settingUpSheets ? 'Menyiapkan Sheet...' : 'Siapkan / Update Sheet (Peserta_Individu)'}
+              </button>
+            ) : (
+              <span className="text-slate-400">Data tersinkron otomatis saat online</span>
+            )}
           </div>
         </div>
 
@@ -293,7 +322,7 @@ export const GasIntegrationModal: React.FC<GasIntegrationModalProps> = ({
           {activeTab === 'schema' && (
             <div className="space-y-3 text-xs">
               <p className="text-slate-600">
-                Fungsi <code>setupDatabaseSheets()</code> pada script akan membuat 6 lembar kerja ini secara otomatis:
+                Fungsi <code>setupDatabaseSheets()</code> pada script akan membuat 8 lembar kerja ini secara otomatis:
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

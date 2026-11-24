@@ -207,6 +207,63 @@ export const VoterView: React.FC<VoterViewProps> = ({
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
   const requiredVotes = activeCategory?.votes_required || 1;
 
+  // Link Live utama yang disematkan pada cabang lomba aktif (untuk Lapisan ke-1 tombol Vote)
+  const primaryLiveLink = useMemo<{ platform: 'TikTok' | 'YouTube' | 'Instagram'; url: string } | null>(() => {
+    if (!activeCategory) return null;
+    const candidates: Array<{ platform: 'TikTok' | 'YouTube' | 'Instagram'; raw?: string }> = [
+      { platform: 'TikTok', raw: activeCategory.live_tiktok },
+      { platform: 'YouTube', raw: activeCategory.live_youtube },
+      { platform: 'Instagram', raw: activeCategory.live_instagram }
+    ];
+    for (const item of candidates) {
+      if (item.raw && item.raw.trim()) {
+        const cleanUrl = sanitizeLiveUrl(item.raw);
+        if (cleanUrl && cleanUrl !== '#') {
+          return { platform: item.platform, url: cleanUrl };
+        }
+      }
+    }
+    return null;
+  }, [activeCategory]);
+
+  // State 2-lapis tombol Vote (tersimpan di sessionStorage agar aman saat kembali dari aplikasi Live di HP)
+  const LIVE_GATE_STORAGE_KEY = 'duta_evoting_live_gate_unlocked';
+  const [unlockedLiveKeys, setUnlockedLiveKeys] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = sessionStorage.getItem(LIVE_GATE_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const activeLiveGateKey = useMemo(() => {
+    if (!activeCategory || !primaryLiveLink) return '';
+    return `${activeCategory.id_kategori}::${primaryLiveLink.url}`;
+  }, [activeCategory, primaryLiveLink]);
+
+  const isLiveLayerActive = Boolean(
+    primaryLiveLink && activeLiveGateKey && !unlockedLiveKeys[activeLiveGateKey]
+  );
+
+  const handleUnlockLiveLayer = () => {
+    if (!activeLiveGateKey) return;
+    setUnlockedLiveKeys(prev => {
+      const next = { ...prev, [activeLiveGateKey]: true };
+      try {
+        sessionStorage.setItem(LIVE_GATE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // abaikan jika sessionStorage tidak tersedia
+      }
+      return next;
+    });
+    setNotification({
+      type: 'success',
+      message: `Link Live ${primaryLiveLink?.platform || ''} telah dibuka! Silakan klik tombol Vote sekali lagi untuk mengirimkan suara Anda.`
+    });
+    setTimeout(() => setNotification(null), 5000);
+  };
+
   // Jadwal waktu buka & tutup voting publik khusus untuk cabang lomba yang sedang aktif
   const categorySchedule = useMemo(() => {
     return apiService.getCategoryVotingSchedule(activeCategory);
@@ -215,10 +272,10 @@ export const VoterView: React.FC<VoterViewProps> = ({
   // Hanya admin dan dewan juri yang boleh melihat jumlah perolehan vote
   const canViewLiveVotes = currentUser?.role === 'admin' || currentUser?.role === 'juri';
 
-  // Check if sub-event is closed: either because admin closed/did not activate it, or deadline has expired
+  // Check if sub-event is closed: either because admin locked it (status_aktif === false), or deadline has expired
   const closedStatus = useMemo(() => {
     return apiService.isEventClosed(currentSubEvent);
-  }, [currentSubEvent]);
+  }, [currentSubEvent, currentTime]);
 
   const isSubEventClosed = closedStatus.isClosed;
 
@@ -256,11 +313,19 @@ export const VoterView: React.FC<VoterViewProps> = ({
   const isQuotaSatisfied = myCategoryVotes.length >= requiredVotes;
   const remainingVotesCount = Math.max(0, requiredVotes - myCategoryVotes.length);
 
-  // Teams belonging to the current sub-event
-  const subEventTeams = useMemo(() => {
+  const isCategoryIndividual = activeCategory?.tipe_peserta === 'Individu';
+
+  // Semua peserta milik sub-event aktif
+  const allSubEventTeams = useMemo(() => {
     const list = teams.filter(t => t.id_event === selectedSubEventId);
     return list.length > 0 ? list : teams;
   }, [teams, selectedSubEventId]);
+
+  // Peserta yang sesuai jenis cabang lomba aktif (Individu vs Group/Regu)
+  const subEventTeams = useMemo(() => {
+    const requiredType: 'Group' | 'Individu' = isCategoryIndividual ? 'Individu' : 'Group';
+    return allSubEventTeams.filter(t => (t.tipe_partisipasi || 'Group') === requiredType);
+  }, [allSubEventTeams, isCategoryIndividual]);
 
   // Filter & Sort A-Z by name
   const processedTeams = useMemo(() => {
@@ -403,10 +468,12 @@ export const VoterView: React.FC<VoterViewProps> = ({
   const handleConfirmCancelVote = async () => {
     if (!cancelVoteTarget) return;
 
-    if (isSubEventClosed) {
+    if (isSubEventClosed || categorySchedule.isBeforeStart || categorySchedule.isAfterEnd) {
       setNotification({
         type: 'error',
-        message: 'Tidak dapat membatalkan suara: Sub-event telah resmi ditutup oleh panitia.'
+        message: isSubEventClosed
+          ? 'Tidak dapat membatalkan suara: Event utama telah resmi ditutup oleh panitia atau batas waktunya berakhir.'
+          : 'Tidak dapat membatalkan suara: Periode voting untuk cabang ini sedang tidak aktif atau telah ditutup.'
       });
       setCancelVoteTarget(null);
       setTimeout(() => setNotification(null), 3500);
@@ -530,7 +597,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
             <span aria-hidden="true" className="opacity-40">·</span>
             <span>SMPIT Pondok Duta</span>
             <span aria-hidden="true" className="opacity-40">·</span>
-            <span>Tipe: {currentSubEvent.tipe_peserta || 'Group'}</span>
+            <span>Tipe: {activeCategory?.tipe_peserta || currentSubEvent.tipe_peserta || 'Group'}</span>
             <span aria-hidden="true" className="opacity-40">·</span>
             <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
               !isSubEventClosed ? 'bg-emerald-800 text-amber-300' : 'bg-rose-900/80 text-rose-300'
@@ -553,8 +620,12 @@ export const VoterView: React.FC<VoterViewProps> = ({
               <span>Ketentuan: Tepat {requiredVotes} Suara per Perangkat</span>
             </div>
             <div className="flex items-center gap-1.5 bg-emerald-900/70 px-3 py-1.5 rounded-xl border border-emerald-700/50">
-              <Users className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>{subEventTeams.length} {currentSubEvent.tipe_peserta === 'Individu' ? 'Peserta' : 'Regu/Kontingen'}</span>
+              {isCategoryIndividual ? (
+                <UserIcon className="w-4 h-4 text-amber-400 shrink-0" />
+              ) : (
+                <Users className="w-4 h-4 text-amber-400 shrink-0" />
+              )}
+              <span>{subEventTeams.length} {isCategoryIndividual ? 'Peserta Individu' : 'Regu/Kontingen'}</span>
             </div>
             {formattedDeadline && (
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${
@@ -869,8 +940,8 @@ export const VoterView: React.FC<VoterViewProps> = ({
         </div>
       )}
 
-      {/* 3c. Banner Waktu Buka & Tutup Vote Publik untuk Cabang Lomba Aktif */}
-      {categorySchedule.status !== 'not_set' && (
+      {/* 3c. Banner Waktu Buka & Tutup Vote Publik untuk Cabang Lomba Aktif (hanya tampil saat event utama masih dibuka) */}
+      {!isSubEventClosed && categorySchedule.status !== 'not_set' && (
         <div className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
           categorySchedule.isBeforeStart
             ? 'bg-gradient-to-r from-amber-950/95 via-amber-900/90 to-yellow-950/95 border-amber-500/50 text-amber-100 shadow-md ring-1 ring-amber-500/20'
@@ -930,7 +1001,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
                 <p className="text-xs mt-1 leading-relaxed opacity-90">
                   {categorySchedule.isBeforeStart ? (
                     <>
-                      Voting dibuka pada <strong>{categorySchedule.formattedStart}</strong>. Saat ini tombol vote terkunci, namun Anda tetap dapat melihat foto dan profil seluruh regu di bawah ini untuk menunggu.
+                      Voting dibuka pada <strong>{categorySchedule.formattedStart}</strong>. Saat ini tombol vote terkunci, namun Anda tetap dapat melihat foto dan profil seluruh {isCategoryIndividual ? 'peserta' : 'regu'} di bawah ini untuk menunggu.
                     </>
                   ) : categorySchedule.isAfterEnd ? (
                     <>
@@ -1027,7 +1098,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
-              placeholder={`Cari nama ${currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'}, kelas, kontingen...`}
+              placeholder={`Cari nama ${isCategoryIndividual ? 'peserta' : 'regu'}, kelas, kontingen...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-9 py-2.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-700 focus:border-transparent bg-slate-50 focus:bg-white transition-colors"
@@ -1076,7 +1147,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
         {/* Search Results Summary */}
         <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100">
           <span>
-            Menampilkan <strong>{processedTeams.length}</strong> dari {subEventTeams.length} {currentSubEvent.tipe_peserta === 'Individu' ? 'peserta' : 'regu'} (Urut {sortOrder === 'asc' ? 'A ke Z' : 'Z ke A'})
+            Menampilkan <strong>{processedTeams.length}</strong> dari {subEventTeams.length} {isCategoryIndividual ? 'peserta' : 'regu'} (Urut {sortOrder === 'asc' ? 'A ke Z' : 'Z ke A'})
           </span>
           {searchQuery && (
             <span className="truncate max-w-[160px] sm:max-w-none">
@@ -1087,9 +1158,27 @@ export const VoterView: React.FC<VoterViewProps> = ({
       </div>
 
       {/* 6. Teams Grid */}
-      {processedTeams.length === 0 ? (
+      {subEventTeams.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-8 sm:p-12 text-center space-y-2">
+          <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+            {isCategoryIndividual ? <UserIcon className="w-6 h-6" /> : <Users className="w-6 h-6" />}
+          </div>
+          <p className="text-sm font-bold text-slate-800">
+            {isCategoryIndividual
+              ? `Belum ada peserta individu terdaftar untuk cabang "${activeCategory?.nama_kategori}".`
+              : `Belum ada regu/group terdaftar untuk cabang "${activeCategory?.nama_kategori}".`}
+          </p>
+          <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+            {isCategoryIndividual
+              ? 'Cabang lomba ini bertipe Individu sehingga hanya menampilkan nama-nama peserta perorangan (bukan regu/group). Admin dapat menambahkan peserta bertipe Individu melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'
+              : 'Admin dapat menambahkan data regu/group melalui Panel Admin → Peserta & Akun Juri → Tambah Peserta.'}
+          </p>
+        </div>
+      ) : processedTeams.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-8 sm:p-12 text-center">
-          <p className="text-sm font-bold text-slate-800">Tidak ada peserta/regu yang cocok dengan pencarian.</p>
+          <p className="text-sm font-bold text-slate-800">
+            Tidak ada {isCategoryIndividual ? 'peserta' : 'regu'} yang cocok dengan pencarian.
+          </p>
           <p className="text-xs text-slate-500 mt-1">Coba kata kunci lain atau bersihkan kotak pencarian.</p>
           <button
             onClick={() => {
@@ -1108,7 +1197,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
             const userVoteObj = myCategoryVotes.find(v => v.id_team === team.id_team);
             const isVotedByMe = Boolean(userVoteObj);
             const isPutra = team.kategori_regu === 'Putra';
-            const isIndividual = team.tipe_partisipasi === 'Individu';
+            const isIndividual = team.tipe_partisipasi === 'Individu' || isCategoryIndividual;
 
             const hasPhoto = Boolean(team.foto_url && team.foto_url.trim().length > 4);
             const members = Array.isArray(team.anggota) ? team.anggota : [];
@@ -1195,8 +1284,8 @@ export const VoterView: React.FC<VoterViewProps> = ({
                     </div>
                   )}
 
-                  {/* Daftar Anggota Regu */}
-                  {members.length > 0 && (
+                  {/* Daftar Anggota Regu (khusus Group/Regu) */}
+                  {!isIndividual && members.length > 0 && (
                     <div className="mt-auto pt-2 space-y-1.5">
                       <div className="flex items-center justify-between text-xs font-bold text-amber-300">
                         <div className="flex items-center gap-1.5">
@@ -1248,7 +1337,7 @@ export const VoterView: React.FC<VoterViewProps> = ({
                         <CheckCircle2 className="w-4 h-4 text-amber-300 shrink-0" />
                         <span>Pilihan Anda Terpilih</span>
                       </div>
-                      {!isSubEventClosed && !categorySchedule.isAfterEnd && (
+                      {!isSubEventClosed && !categorySchedule.isBeforeStart && !categorySchedule.isAfterEnd && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1266,6 +1355,14 @@ export const VoterView: React.FC<VoterViewProps> = ({
                         </button>
                       )}
                     </div>
+                  ) : isSubEventClosed ? (
+                    <button
+                      disabled
+                      className="w-full min-h-[44px] py-2.5 px-3 text-xs font-medium text-slate-400 bg-slate-900/80 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5 border border-white/10"
+                    >
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{closedStatus.reason === 'not_active' ? 'Event Ditutup' : 'Voting Ditutup (Waktu Habis)'}</span>
+                    </button>
                   ) : categorySchedule.isBeforeStart ? (
                     <button
                       disabled
@@ -1284,14 +1381,6 @@ export const VoterView: React.FC<VoterViewProps> = ({
                       <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                       <span>Voting Telah Ditutup</span>
                     </button>
-                  ) : isSubEventClosed ? (
-                    <button
-                      disabled
-                      className="w-full min-h-[44px] py-2.5 px-3 text-xs font-medium text-slate-400 bg-slate-900/80 rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5 border border-white/10"
-                    >
-                      <Lock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{closedStatus.reason === 'not_active' ? 'Event Ditutup' : 'Voting Ditutup (Waktu Habis)'}</span>
-                    </button>
                   ) : isQuotaSatisfied ? (
                     <button
                       disabled
@@ -1300,15 +1389,38 @@ export const VoterView: React.FC<VoterViewProps> = ({
                       Kuota {requiredVotes} Suara Lengkap
                     </button>
                   ) : (
-                    <button
-                      onClick={() => handleOpenVoteModal(team)}
-                      className="w-full min-h-[44px] py-2.5 px-4 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:brightness-110 active:scale-[0.98] rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Vote className="w-4 h-4 text-slate-950 shrink-0" />
-                      <span>
-                        Vote (Suara {myCategoryVotes.length + 1} dari {requiredVotes})
-                      </span>
-                    </button>
+                    <div className="relative w-full">
+                      {/* Lapisan ke-2: Tombol Vote Asli (aktif setelah Lapisan ke-1 diklik) */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenVoteModal(team)}
+                        tabIndex={isLiveLayerActive ? -1 : 0}
+                        aria-hidden={isLiveLayerActive}
+                        className="w-full min-h-[44px] py-2.5 px-4 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:brightness-110 active:scale-[0.98] rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Vote className="w-4 h-4 text-slate-950 shrink-0" />
+                        <span>
+                          Vote (Suara {myCategoryVotes.length + 1} dari {requiredVotes})
+                        </span>
+                      </button>
+
+                      {/* Lapisan ke-1: Lapisan Link Live (klik pertama diarahkan ke link Live yang disematkan) */}
+                      {isLiveLayerActive && primaryLiveLink && (
+                        <a
+                          href={primaryLiveLink.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={handleUnlockLiveLayer}
+                          title={`Klik pertama membuka Siaran Langsung ${primaryLiveLink.platform}, klik kedua untuk Vote`}
+                          className="absolute inset-0 z-10 w-full min-h-[44px] py-2.5 px-4 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:brightness-110 active:scale-[0.98] rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Vote className="w-4 h-4 text-slate-950 shrink-0" />
+                          <span>
+                            Vote (Suara {myCategoryVotes.length + 1} dari {requiredVotes})
+                          </span>
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1407,8 +1519,8 @@ export const VoterView: React.FC<VoterViewProps> = ({
                 </div>
               </div>
 
-              {/* Daftar Seluruh Anggota Regu dalam Modal Konfirmasi */}
-              {Array.isArray(teamToVote.anggota) && teamToVote.anggota.length > 0 && (
+              {/* Daftar Seluruh Anggota Regu dalam Modal Konfirmasi (khusus Group/Regu) */}
+              {teamToVote.tipe_partisipasi !== 'Individu' && !isCategoryIndividual && Array.isArray(teamToVote.anggota) && teamToVote.anggota.length > 0 && (
                 <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 text-xs">
                   <div className="font-bold text-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-1.5">

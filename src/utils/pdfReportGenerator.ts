@@ -185,9 +185,11 @@ export async function generateRecapPDF(
   doc.text(':', col1X + 32, metaTop + 5 + (lineSpacing * 2));
   doc.text(juryCountDesc, col1X + 35, metaTop + 5 + (lineSpacing * 2));
 
+  const isIndividuCat = category.tipe_peserta === 'Individu';
+
   doc.text('Total Peserta', col2X, metaTop + 5 + (lineSpacing * 2));
   doc.text(':', col2X + 28, metaTop + 5 + (lineSpacing * 2));
-  doc.text(`${recapData.length} Regu / Peserta`, col2X + 31, metaTop + 5 + (lineSpacing * 2));
+  doc.text(`${recapData.length} ${isIndividuCat ? 'Peserta Individu' : 'Regu / Group'}`, col2X + 31, metaTop + 5 + (lineSpacing * 2));
 
   // 4. DATA TABLE (autoTable)
   const tableData = recapData.map((row) => {
@@ -214,8 +216,8 @@ export async function generateRecapPDF(
     margin: { left: margin, right: margin },
     head: [[
       'Rank',
-      'Nama Peserta / Regu',
-      'Pangkalan / Kelas',
+      isIndividuCat ? 'Nama Siswa / Peserta' : 'Nama Regu / Group',
+      isIndividuCat ? 'Kelas / Kontingen' : 'Pangkalan / Kelas',
       'Rata Juri\n(1 - 5)',
       'Juri\n(100)',
       'Vote Publik\n(Suara)',

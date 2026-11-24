@@ -23,6 +23,11 @@ import {
   LOGO_TUT_WURI_SVG
 } from '../utils/reportLogos';
 import {
+  toDateTimeLocalValue,
+  formatScheduleDateTime,
+  formatScheduleShort
+} from '../utils/dateTime';
+import {
   Settings,
   Users,
   Award,
@@ -53,6 +58,7 @@ import {
   Upload,
   Image as ImageIcon,
   RotateCcw,
+  RefreshCw,
   Building,
   ChevronDown,
   ChevronUp,
@@ -167,6 +173,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isDeletingTeam, setIsDeletingTeam] = useState(false);
 
   // New team/participant form state
+  const [isSettingUpSheets, setIsSettingUpSheets] = useState(false);
   const [newParticipantEventId, setNewParticipantEventId] = useState<string>(event.id_event);
   const [newParticipantType, setNewParticipantType] = useState<'Group' | 'Individu'>('Group');
   const [newTeamName, setNewTeamName] = useState('');
@@ -271,8 +278,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isPurging, setIsPurging] = useState(false);
 
   const activeCategory = subEventCategories.find(c => c.id_kategori === selectedCategoryId) || subEventCategories[0] || categories[0];
+  const effectiveCategoryId = activeCategory?.id_kategori || selectedCategoryId;
+  const isActiveCategoryIndividual = activeCategory?.tipe_peserta === 'Individu';
   const juryUsers = users.filter(u => u.role === 'juri');
   const currentVotesRequired = activeCategory?.votes_required || 1;
+
+  // Peserta yang sesuai jenis cabang lomba aktif (Individu -> Sheet Peserta_Individu, Group -> Sheet Teams)
+  const categoryParticipants = useMemo(() => {
+    const requiredType: 'Group' | 'Individu' = isActiveCategoryIndividual ? 'Individu' : 'Group';
+    return subEventTeams
+      .filter(t => (t.tipe_partisipasi || 'Group') === requiredType)
+      .sort((a, b) => a.nama_regu.localeCompare(b.nama_regu, 'id', { sensitivity: 'base' }));
+  }, [subEventTeams, isActiveCategoryIndividual]);
 
   // Juri yang muncul di Matrix Penilaian HANYA juri yang sudah dipilih sesuai Cabang Lomba
   const categoryAssignedJuryUsers = useMemo(() => {
@@ -291,7 +308,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   }, [juryUsers, activeCategory]);
 
   // Calculate current category recap
-  const recapData = apiService.calculateRecap(selectedCategoryId, juryWeight, publicWeight);
+  const recapData = apiService.calculateRecap(effectiveCategoryId, juryWeight, publicWeight);
 
   const handleUpdateWeight = (newJuryW: number) => {
     const clampedJury = Math.max(0, Math.min(100, newJuryW));
@@ -373,11 +390,25 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleCreateParticipant = (e: React.FormEvent) => {
+  const handleSetupDatabaseSheets = async () => {
+    setIsSettingUpSheets(true);
+    try {
+      const res = await apiService.setupDatabaseSheets();
+      setBannerMsg({ type: res.success ? 'success' : 'error', text: res.message });
+      if (res.success) {
+        await onRefreshData(true);
+      }
+      setTimeout(() => setBannerMsg(null), 4500);
+    } finally {
+      setIsSettingUpSheets(false);
+    }
+  };
+
+  const handleCreateParticipant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeamName || !newTeamClass) return;
 
-    const res = apiService.addTeam({
+    const res = await apiService.addTeam({
       id_event: newParticipantEventId,
       nama_regu: newTeamName.trim(),
       tipe_partisipasi: newParticipantType,
@@ -394,21 +425,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setNewTeamClass('');
       setNewTeamMotto('');
       setNewTeamLeader('');
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
+      await onRefreshData();
+      setTimeout(() => setBannerMsg(null), 4000);
     }
   };
 
-  const handleUpdateTeam = (e: React.FormEvent) => {
+  const handleUpdateTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTeam) return;
 
-    const res = apiService.updateTeam(editingTeam);
+    const res = await apiService.updateTeam(editingTeam);
     if (res.success) {
       setBannerMsg({ type: 'success', text: res.message });
       setEditingTeam(null);
-      onRefreshData();
-      setTimeout(() => setBannerMsg(null), 3000);
+      await onRefreshData();
+      setTimeout(() => setBannerMsg(null), 3500);
     } else {
       setBannerMsg({ type: 'error', text: res.message });
     }
@@ -422,11 +453,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
     if (!teamToDelete) return;
     setIsDeletingTeam(true);
     try {
-      const res = apiService.deleteTeam(teamToDelete.id_team);
+      const res = await apiService.deleteTeam(teamToDelete.id_team);
       if (res.success) {
         setBannerMsg({ type: 'success', text: res.message });
         setTeamToDelete(null);
-        onRefreshData();
+        await onRefreshData();
         setTimeout(() => setBannerMsg(null), 3500);
       } else {
         setBannerMsg({ type: 'error', text: res.message });
@@ -626,7 +657,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
     try {
       const res = await apiService.updateCategory({
         ...editingCategory,
-        kriteria: criteriaToSave
+        kriteria: criteriaToSave,
+        voting_start: toDateTimeLocalValue(editingCategory.voting_start),
+        voting_end: toDateTimeLocalValue(editingCategory.voting_end)
       });
       if (res.success) {
         setBannerMsg({ type: 'success', text: res.message });
@@ -1473,7 +1506,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </button>
 
                 <button
-                  onClick={() => onOpenPrintReport(selectedCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
+                  onClick={() => onOpenPrintReport(effectiveCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
                   className="px-4 py-2 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
                   title="Unduh dokumen Berita Acara Rekapitulasi Resmi format PDF"
                 >
@@ -2004,7 +2037,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => onOpenPrintReport(selectedCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
+                      onClick={() => onOpenPrintReport(effectiveCategoryId, recapData, { jury: juryWeight, public: publicWeight })}
                       className="px-4 py-2 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-98 rounded-lg flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
                     >
                       <FileDown className="w-3.5 h-3.5 text-slate-950" />
@@ -2025,7 +2058,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     Klasemen &amp; Rekapitulasi Nilai Akhir
                   </h3>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    {recapData.length} Peserta
+                    {recapData.length} {isActiveCategoryIndividual ? 'Peserta Individu' : 'Regu / Group'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -2233,8 +2266,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <thead className="bg-slate-100/80 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
                     <tr>
                       <th className="py-3 px-4 w-14 text-center">Rank</th>
-                      <th className="py-3 px-4">Nama Peserta / Regu</th>
-                      <th className="py-3 px-4">Pangkalan / Kelas</th>
+                      <th className="py-3 px-4">{isActiveCategoryIndividual ? 'Nama Siswa / Peserta' : 'Nama Regu / Group'}</th>
+                      <th className="py-3 px-4">{isActiveCategoryIndividual ? 'Kelas / Kontingen' : 'Pangkalan / Kelas'}</th>
                       <th className="py-3 px-4 text-right">Rerata Juri (1-5)</th>
                       <th className="py-3 px-4 text-right">Skor Juri (100)</th>
                       <th className="py-3 px-4 text-right">Vote Publik</th>
@@ -2319,6 +2352,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-slate-900 mb-1 flex flex-wrap items-center gap-2">
                   <span>Matrix Penilaian Dewan Juri — {activeCategory.nama_kategori}</span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                    isActiveCategoryIndividual
+                      ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  }`}>
+                    {isActiveCategoryIndividual
+                      ? `Individu (${categoryParticipants.length} Siswa)`
+                      : `Group (${categoryParticipants.length} Regu)`}
+                  </span>
                   {activeCategory.assigned_juries && activeCategory.assigned_juries.length > 0 ? (
                     <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
                       {categoryAssignedJuryUsers.length} Juri Ditugaskan
@@ -2330,7 +2372,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   )}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Berikut rincian skor angka (skala 1 - 5) yang diberikan masing-masing Dewan Juri yang ditugaskan untuk cabang lomba <strong>{activeCategory.nama_kategori}</strong>.
+                  Berikut rincian skor angka (skala 1 - 5) yang diberikan masing-masing Dewan Juri untuk {isActiveCategoryIndividual ? 'peserta individu (siswa)' : 'regu/group'} pada cabang lomba <strong>{activeCategory.nama_kategori}</strong>.
                 </p>
               </div>
 
@@ -2353,77 +2395,95 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
-                  <tr>
-                    <th className="py-3 px-4">Nama Peserta / Regu</th>
-                    <th className="py-3 px-4">Pangkalan / Kelas</th>
-                    {categoryAssignedJuryUsers.map(jury => (
-                      <th key={jury.id} className="py-3 px-4 text-center">
-                        <div>{jury.nama}</div>
-                        <span className="text-[10px] text-slate-400 font-normal">
-                          {jury.jurySpecialty || 'Juri'}
-                        </span>
-                      </th>
-                    ))}
-                    <th className="py-3 px-4 text-right font-bold text-emerald-900">Rerata (1-5)</th>
-                    <th className="py-3 px-4 text-right font-bold text-emerald-900">Skor Konversi (100)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {subEventTeams.map(team => {
-                    const validJuryIds = new Set<string>();
-                    categoryAssignedJuryUsers.forEach(j => {
-                      validJuryIds.add(j.id);
-                      validJuryIds.add(j.username);
-                    });
+            {categoryParticipants.length === 0 ? (
+              <div className="p-8 text-center space-y-2">
+                <p className="text-sm font-bold text-slate-800">
+                  {isActiveCategoryIndividual
+                    ? 'Belum ada peserta individu terdaftar pada sub-event ini.'
+                    : 'Belum ada regu/group terdaftar pada sub-event ini.'}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {isActiveCategoryIndividual
+                    ? 'Tambahkan data siswa melalui tab Peserta & Akun Juri → Tambah Peserta Individu (Sheet Peserta_Individu).'
+                    : 'Tambahkan data regu melalui tab Peserta & Akun Juri → Tambah Regu / Group (Sheet Teams).'}
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4">{isActiveCategoryIndividual ? 'Nama Siswa / Peserta' : 'Nama Regu / Group'}</th>
+                      <th className="py-3 px-4">{isActiveCategoryIndividual ? 'Kelas / Kontingen' : 'Pangkalan / Kelas'}</th>
+                      {categoryAssignedJuryUsers.map(jury => (
+                        <th key={jury.id} className="py-3 px-4 text-center">
+                          <div>{jury.nama}</div>
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            {jury.jurySpecialty || 'Juri'}
+                          </span>
+                        </th>
+                      ))}
+                      <th className="py-3 px-4 text-right font-bold text-emerald-900">Rerata (1-5)</th>
+                      <th className="py-3 px-4 text-right font-bold text-emerald-900">Skor Konversi (100)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {categoryParticipants.map(team => {
+                      const validJuryIds = new Set<string>();
+                      categoryAssignedJuryUsers.forEach(j => {
+                        validJuryIds.add(j.id);
+                        validJuryIds.add(j.username);
+                      });
 
-                    const teamScores = juryScores.filter(
-                      s => s.id_kategori === selectedCategoryId &&
-                           s.id_team === team.id_team &&
-                           (validJuryIds.has(s.id_jury) || validJuryIds.has(s.jury_name))
-                    );
+                      const teamScores = juryScores.filter(
+                        s => s.id_kategori === effectiveCategoryId &&
+                             s.id_team === team.id_team &&
+                             (validJuryIds.has(s.id_jury) || validJuryIds.has(s.jury_name))
+                      );
 
-                    let avg1to5 = 0;
-                    if (teamScores.length > 0) {
-                      const sum = teamScores.reduce((acc, curr) => acc + curr.skor_1_to_5, 0);
-                      avg1to5 = Number((sum / teamScores.length).toFixed(2));
-                    }
-                    const score100 = Number((avg1to5 * 20).toFixed(2));
+                      let avg1to5 = 0;
+                      if (teamScores.length > 0) {
+                        const sum = teamScores.reduce((acc, curr) => acc + curr.skor_1_to_5, 0);
+                        avg1to5 = Number((sum / teamScores.length).toFixed(2));
+                      }
+                      const score100 = Number((avg1to5 * 20).toFixed(2));
 
-                    return (
-                      <tr key={team.id_team} className="hover:bg-slate-50/60">
-                        <td className="py-3 px-4 font-bold text-slate-900">
-                          {team.nama_regu}
-                        </td>
-                        <td className="py-3 px-4 text-slate-600">{team.kelas_pangkalan}</td>
-                        {categoryAssignedJuryUsers.map(jury => {
-                          const jScore = teamScores.find(s => s.id_jury === jury.id || s.id_jury === jury.username);
-                          return (
-                            <td key={jury.id} className="py-3 px-4 text-center font-mono tabular-nums">
-                              {jScore ? (
-                                <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
-                                  {jScore.skor_1_to_5.toFixed(2)}
-                                </span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 tabular-nums">
-                          {avg1to5 > 0 ? avg1to5.toFixed(2) : '-'}
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono font-extrabold text-emerald-900 tabular-nums">
-                          {score100 > 0 ? score100.toFixed(2) : '-'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                      return (
+                        <tr key={team.id_team} className="hover:bg-slate-50/60">
+                          <td className="py-3 px-4 font-bold text-slate-900">
+                            <div>{team.nama_regu}</div>
+                            <span className="text-[10px] font-medium text-slate-400">
+                              {isActiveCategoryIndividual ? 'Individu' : 'Regu'} {team.kategori_regu}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">{team.kelas_pangkalan}</td>
+                          {categoryAssignedJuryUsers.map(jury => {
+                            const jScore = teamScores.find(s => s.id_jury === jury.id || s.id_jury === jury.username);
+                            return (
+                              <td key={jury.id} className="py-3 px-4 text-center font-mono tabular-nums">
+                                {jScore ? (
+                                  <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                                    {jScore.skor_1_to_5.toFixed(2)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300">-</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 tabular-nums">
+                            {avg1to5 > 0 ? avg1to5.toFixed(2) : '-'}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-extrabold text-emerald-900 tabular-nums">
+                            {score100 > 0 ? score100.toFixed(2) : '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2434,33 +2494,72 @@ export const AdminView: React.FC<AdminViewProps> = ({
       {activeTab === 'voting' && (
         <div className="space-y-6">
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-            <h3 className="text-sm font-bold text-slate-900 mb-1">
-              Perolehan Suara Voters Bebas — {activeCategory.nama_kategori}
-            </h3>
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <h3 className="text-sm font-bold text-slate-900">
+                Perolehan Suara Voters Bebas — {activeCategory.nama_kategori}
+              </h3>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                isActiveCategoryIndividual
+                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              }`}>
+                {isActiveCategoryIndividual
+                  ? `Peserta Individu (${categoryParticipants.length} Siswa)`
+                  : `Regu / Group (${categoryParticipants.length} Regu)`}
+              </span>
+            </div>
             <p className="text-xs text-slate-500">
-              Hasil suara murni dari pemilih terverifikasi (Siswa, Alumni, Guru & Umum) dengan aturan {currentVotesRequired} vote per akun.
+              Hasil suara murni dari pemilih terverifikasi (Siswa, Alumni, Guru & Umum) untuk {isActiveCategoryIndividual ? 'peserta individu' : 'regu/group'} dengan aturan {currentVotesRequired} vote per perangkat.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {subEventTeams.map(t => {
-              const votes = publicVotes.filter(
-                v => v.id_kategori === selectedCategoryId && v.id_team === t.id_team
-              );
-              return (
-                <div key={t.id_team} className="bg-white p-4 rounded-xl border border-slate-200">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase">{t.kategori_regu}</span>
-                    <span className="font-mono text-lg font-bold text-emerald-800 tabular-nums">
-                      {votes.length} Suara
-                    </span>
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900">{t.nama_regu}</h4>
-                  <p className="text-xs text-slate-500">{t.kelas_pangkalan}</p>
-                </div>
-              );
-            })}
-          </div>
+          {categoryParticipants.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center space-y-2 shadow-xs">
+              <p className="text-sm font-bold text-slate-800">
+                {isActiveCategoryIndividual
+                  ? 'Belum ada peserta individu terdaftar pada sub-event ini.'
+                  : 'Belum ada regu/group terdaftar pada sub-event ini.'}
+              </p>
+              <p className="text-xs text-slate-500">
+                {isActiveCategoryIndividual
+                  ? 'Tambahkan data siswa melalui tab Peserta & Akun Juri → Tambah Peserta Individu (Sheet Peserta_Individu).'
+                  : 'Tambahkan data regu melalui tab Peserta & Akun Juri → Tambah Regu / Group (Sheet Teams).'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[...categoryParticipants]
+                .sort((a, b) => {
+                  const votesA = publicVotes.filter(v => v.id_kategori === effectiveCategoryId && v.id_team === a.id_team).length;
+                  const votesB = publicVotes.filter(v => v.id_kategori === effectiveCategoryId && v.id_team === b.id_team).length;
+                  if (votesB !== votesA) return votesB - votesA;
+                  return a.nama_regu.localeCompare(b.nama_regu, 'id', { sensitivity: 'base' });
+                })
+                .map(t => {
+                  const votes = publicVotes.filter(
+                    v => v.id_kategori === effectiveCategoryId && v.id_team === t.id_team
+                  );
+                  return (
+                    <div key={t.id_team} className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+                          isActiveCategoryIndividual
+                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}>
+                          {isActiveCategoryIndividual ? 'Individu' : 'Regu'} {t.kategori_regu}
+                        </span>
+                        <span className="font-mono text-lg font-bold text-emerald-800 tabular-nums">
+                          {votes.length} Suara
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-900">{t.nama_regu}</h4>
+                      <p className="text-xs text-slate-500">{t.kelas_pangkalan}</p>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
         </div>
       )}
 
@@ -2592,12 +2691,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         )}
 
                         {(c.voting_start || c.voting_end) && (
-                          <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded font-medium flex items-center gap-1" title={`Jadwal vote: ${c.voting_start || 'Awal'} s/d ${c.voting_end || 'Akhir'}`}>
+                          <span
+                            className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded font-medium flex items-center gap-1"
+                            title={`Jadwal vote: ${formatScheduleDateTime(c.voting_start) || 'Buka Langsung'} s/d ${formatScheduleDateTime(c.voting_end) || 'Tanpa Batas'}`}
+                          >
                             <Clock className="w-3 h-3 text-indigo-600 inline shrink-0" />
                             <span>
-                              {c.voting_start ? new Date(c.voting_start).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Buka Langsung'}
+                              {formatScheduleShort(c.voting_start) || 'Buka Langsung'}
                               {' s/d '}
-                              {c.voting_end ? new Date(c.voting_end).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Selesai'}
+                              {formatScheduleShort(c.voting_end) || 'Selesai'}
                             </span>
                           </span>
                         )}
@@ -2621,7 +2723,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           onClick={() => setEditingCategory({
                             ...c,
                             assessment_type: c.assessment_type || 'all',
-                            assigned_juries: c.assigned_juries || []
+                            assigned_juries: c.assigned_juries || [],
+                            voting_start: toDateTimeLocalValue(c.voting_start),
+                            voting_end: toDateTimeLocalValue(c.voting_end)
                           })}
                           className="p-1.5 text-slate-500 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                           title="Edit Informasi Cabang Lomba"
@@ -3096,25 +3200,39 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-bold text-slate-900">Manajemen Peserta & Akun Dewan Juri</h3>
-              <p className="text-xs text-slate-500">Kelola peserta (Group atau Individu) dan akun juri resmi dengan fitur Edit & Hapus</p>
+              <p className="text-xs text-slate-500">
+                Data Regu/Group (<strong className="text-emerald-800">Sheet Teams</strong>), Peserta Individu (<strong className="text-indigo-800">Sheet Peserta_Individu</strong>), dan Akun Dewan Juri (<strong className="text-slate-700">Sheet Users</strong>)
+              </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => {
                   setNewParticipantEventId(selectedAdminSubEventId);
+                  setNewParticipantType('Group');
                   setShowAddTeamModal(true);
                 }}
-                className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
+                className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Tambah Peserta (Group / Individu)</span>
+                <span>Tambah Regu / Group</span>
+              </button>
+              <button
+                onClick={() => {
+                  setNewParticipantEventId(selectedAdminSubEventId);
+                  setNewParticipantType('Individu');
+                  setShowAddTeamModal(true);
+                }}
+                className="px-3.5 py-2 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-600 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Peserta Individu</span>
               </button>
               <button
                 onClick={() => {
                   setJuryFormError(null);
                   setShowAddJuryModal(true);
                 }}
-                className="px-3.5 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 transition-colors"
+                className="px-3.5 py-2 text-xs font-semibold text-slate-800 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Buat Akun Juri</span>
@@ -3122,79 +3240,248 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           </div>
 
-          {/* Section: Daftar Peserta Terdaftar with EDIT & HAPUS */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                Daftar Peserta Event: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event} ({subEventTeams.length})
-              </h4>
-              <span className="text-xs text-slate-500">
-                Tipe Event: <strong>{currentAdminSubEvent.tipe_peserta || 'Group'}</strong>
-              </span>
-            </div>
+          {(() => {
+            const groupTeams = subEventTeams.filter(t => (t.tipe_partisipasi || 'Group') !== 'Individu');
+            const individualParticipants = subEventTeams.filter(t => t.tipe_partisipasi === 'Individu');
 
-            {subEventTeams.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">
-                Belum ada peserta terdaftar pada event ini. Klik "Tambah Peserta" untuk menambahkan.
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {subEventTeams.map(t => (
-                  <div key={t.id_team} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
-                    <div className="flex items-start gap-3 flex-1">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
-                        t.kategori_regu === 'Putra'
-                          ? 'bg-gradient-to-br from-emerald-800 to-teal-900'
-                          : 'bg-gradient-to-br from-rose-700 to-pink-900'
-                      }`}>
-                        {getTeamInitials(t.nama_regu)}
+            return (
+              <div className="space-y-6">
+                {/* Section 1: Daftar Peserta Individu (Sheet Peserta_Individu) */}
+                <div className="bg-white rounded-xl border border-indigo-200/80 overflow-hidden shadow-xs">
+                  <div className="p-4 bg-gradient-to-r from-indigo-50/90 to-slate-50 border-b border-indigo-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
+                        <UserIcon className="w-4 h-4" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-slate-900">{t.nama_regu}</span>
-                          <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
-                            {t.tipe_partisipasi === 'Individu' ? 'Individu' : 'Group'} · {t.kategori_regu}
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider">
+                            Daftar Peserta Individu: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event} ({individualParticipants.length})
+                          </h4>
+                          <span className="text-[10px] font-bold text-indigo-800 bg-white px-2 py-0.5 rounded border border-indigo-200">
+                            Sheet Peserta_Individu
                           </span>
                         </div>
-                        <p className="text-xs text-slate-600 mt-0.5">
-                          {t.kelas_pangkalan} {t.ketua_regu && `· ${t.tipe_partisipasi === 'Individu' ? 'Pembimbing' : 'Ketua'}: ${t.ketua_regu}`}
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Tampil otomatis pada Voting Publik &amp; Penilaian Dewan Juri untuk cabang lomba bertipe <strong>Individu</strong>.
                         </p>
-                        <p className="text-[11px] text-slate-400 italic mt-0.5">"{t.motto}"</p>
                       </div>
                     </div>
 
-                    {/* Action buttons: Edit & Hapus */}
-                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                      {apiService.getGasUrl() && (
+                        <button
+                          type="button"
+                          onClick={handleSetupDatabaseSheets}
+                          disabled={isSettingUpSheets}
+                          className="px-2.5 py-1.5 text-[11px] font-semibold text-indigo-800 bg-white border border-indigo-200 hover:bg-indigo-50 rounded-lg flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                          title="Buat/Sinkronkan Tab Sheet Peserta_Individu di Google Sheets"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isSettingUpSheets ? 'animate-spin' : ''}`} />
+                          <span>{isSettingUpSheets ? 'Menyiapkan...' : 'Siapkan Sheet'}</span>
+                        </button>
+                      )}
                       <button
-                        onClick={() => setEditingTeam({ ...t })}
-                        className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-emerald-800 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs"
-                        title="Edit Data Peserta"
+                        type="button"
+                        onClick={() => {
+                          setNewParticipantEventId(selectedAdminSubEventId);
+                          setNewParticipantType('Individu');
+                          setShowAddTeamModal(true);
+                        }}
+                        className="px-3 py-1.5 text-[11px] font-bold text-white bg-indigo-700 hover:bg-indigo-600 rounded-lg flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
                       >
-                        <Edit2 className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Edit</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleDeleteTeam(t)}
-                        className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg flex items-center gap-1.5 transition-colors"
-                        title="Hapus Peserta"
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Hapus</span>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Individu</span>
                       </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Section: Akun Dewan Juri with EDIT & HAPUS */}
+                  {individualParticipants.length === 0 ? (
+                    <div className="p-7 text-center space-y-2.5">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-400 flex items-center justify-center mx-auto">
+                        <UserIcon className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs font-semibold text-slate-700">
+                        Belum ada peserta individu terdaftar pada event ini.
+                      </p>
+                      <p className="text-[11px] text-slate-400 max-w-md mx-auto">
+                        Tambahkan nama-nama peserta individu agar otomatis tersimpan di <strong>Sheet Peserta_Individu</strong> dan muncul pada cabang lomba bertipe Individu.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewParticipantEventId(selectedAdminSubEventId);
+                          setNewParticipantType('Individu');
+                          setShowAddTeamModal(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-indigo-700 hover:bg-indigo-600 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tambah Peserta Individu Pertama</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {individualParticipants.map(t => (
+                        <div key={t.id_team} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-indigo-50/30 transition-colors">
+                          <div className="flex items-start gap-3 flex-1">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
+                              t.kategori_regu === 'Putra'
+                                ? 'bg-gradient-to-br from-indigo-700 to-blue-900'
+                                : 'bg-gradient-to-br from-rose-700 to-pink-900'
+                            }`}>
+                              {getTeamInitials(t.nama_regu)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-slate-900">{t.nama_regu}</span>
+                                <span className="text-[11px] font-semibold text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                                  Individu · {t.kategori_regu}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 mt-0.5">
+                                {t.kelas_pangkalan} {t.ketua_regu && `· Pembimbing: ${t.ketua_regu}`}
+                              </p>
+                              {t.motto && (
+                                <p className="text-[11px] text-slate-400 italic mt-0.5">"{t.motto}"</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action buttons: Edit & Hapus */}
+                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                            <button
+                              onClick={() => setEditingTeam({ ...t })}
+                              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-indigo-800 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                              title="Edit Data Peserta Individu"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-indigo-700" />
+                              <span>Edit</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteTeam(t)}
+                              className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                              title="Hapus Peserta Individu"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 2: Daftar Regu / Group (Sheet Teams) */}
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                  <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                            Daftar Regu / Group: {currentAdminSubEvent.kode_event || currentAdminSubEvent.nama_event} ({groupTeams.length})
+                          </h4>
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            Sheet Teams
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Tampil otomatis pada Voting Publik &amp; Penilaian Dewan Juri untuk cabang lomba bertipe <strong>Group / Regu</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewParticipantEventId(selectedAdminSubEventId);
+                        setNewParticipantType('Group');
+                        setShowAddTeamModal(true);
+                      }}
+                      className="px-3 py-1.5 text-[11px] font-bold text-white bg-emerald-800 hover:bg-emerald-700 rounded-lg flex items-center gap-1 transition-colors shadow-2xs shrink-0 self-start sm:self-auto cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Regu</span>
+                    </button>
+                  </div>
+
+                  {groupTeams.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-slate-400">
+                      Belum ada regu/group terdaftar pada event ini. Klik "Tambah Regu" untuk menambahkan.
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {groupTeams.map(t => (
+                        <div key={t.id_team} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                          <div className="flex items-start gap-3 flex-1">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs ${
+                              t.kategori_regu === 'Putra'
+                                ? 'bg-gradient-to-br from-emerald-800 to-teal-900'
+                                : 'bg-gradient-to-br from-rose-700 to-pink-900'
+                            }`}>
+                              {getTeamInitials(t.nama_regu)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-slate-900">{t.nama_regu}</span>
+                                <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                                  Group · {t.kategori_regu}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-600 mt-0.5">
+                                {t.kelas_pangkalan} {t.ketua_regu && `· Ketua: ${t.ketua_regu}`}
+                              </p>
+                              {t.motto && (
+                                <p className="text-[11px] text-slate-400 italic mt-0.5">"{t.motto}"</p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action buttons: Edit & Hapus */}
+                          <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                            <button
+                              onClick={() => setEditingTeam({ ...t })}
+                              className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-emerald-800 rounded-lg flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                              title="Edit Data Regu"
+                            >
+                              <Edit2 className="w-3.5 h-3.5 text-emerald-700" />
+                              <span>Edit</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleDeleteTeam(t)}
+                              className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+                              title="Hapus Regu"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                              <span>Hapus</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Section 3: Akun Dewan Juri with EDIT & HAPUS */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="p-4 bg-slate-50 border-b border-slate-200">
-              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                Daftar Akun Dewan Juri Resmi ({juryUsers.length})
-              </h4>
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Daftar Akun Dewan Juri Resmi ({juryUsers.length})
+                </h4>
+                <span className="text-[10px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded border border-slate-200">
+                  Sheet Users
+                </span>
+              </div>
             </div>
             <div className="divide-y divide-slate-100">
               {juryUsers.map(j => {
@@ -3424,7 +3711,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 italic focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Motto dan Nama Ketua Regu akan tersimpan di database Google Sheets (kolom H &amp; I) serta tampil di kartu pemilih publik.
+                  {editingTeam.tipe_partisipasi === 'Individu'
+                    ? 'Data peserta individu tersimpan terpisah di Sheet Peserta_Individu pada database Google Sheets.'
+                    : 'Data regu/group, Motto, dan Nama Ketua Regu tersimpan di Sheet Teams pada database Google Sheets.'}
                 </p>
               </div>
 
@@ -3869,7 +4158,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   className="w-full p-2.5 rounded-xl border border-slate-300 text-slate-800 italic focus:bg-white focus:ring-2 focus:ring-emerald-700 focus:outline-hidden transition-all"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Motto dan Nama Ketua Regu akan otomatis tersimpan ke kolom H &amp; I Google Sheets Database.
+                  {newParticipantType === 'Individu'
+                    ? 'Data peserta individu akan otomatis tersimpan ke Sheet Peserta_Individu pada database Google Sheets.'
+                    : 'Data regu/group akan otomatis tersimpan ke Sheet Teams pada database Google Sheets.'}
                 </p>
               </div>
 
@@ -4420,31 +4711,65 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div>
-                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
-                      <Clock className="w-3 h-3 text-emerald-600" />
-                      <span>Waktu Dibuka (Mulai Vote)</span>
-                    </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between gap-2 mb-1.5 min-h-[18px]">
+                      <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] whitespace-nowrap">
+                        <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Waktu Dibuka</span>
+                      </label>
+                      {newCatVotingStart && (
+                        <button
+                          type="button"
+                          onClick={() => setNewCatVotingStart('')}
+                          className="text-[10px] font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                        >
+                          Kosongkan
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="datetime-local"
-                      value={newCatVotingStart}
+                      value={toDateTimeLocalValue(newCatVotingStart)}
                       onChange={(e) => setNewCatVotingStart(e.target.value)}
-                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
                     />
+                    {formatScheduleDateTime(newCatVotingStart) && (
+                      <p className="mt-1.5 text-[10px] font-medium text-emerald-700 flex items-center gap-1">
+                        <Calendar className="w-3 h-3 shrink-0" />
+                        <span>{formatScheduleDateTime(newCatVotingStart)}</span>
+                      </p>
+                    )}
                   </div>
 
-                  <div>
-                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
-                      <Lock className="w-3 h-3 text-rose-600" />
-                      <span>Waktu Ditutup (Selesai Vote)</span>
-                    </label>
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between gap-2 mb-1.5 min-h-[18px]">
+                      <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] whitespace-nowrap">
+                        <Lock className="w-3 h-3 text-rose-600 shrink-0" />
+                        <span>Waktu Ditutup</span>
+                      </label>
+                      {newCatVotingEnd && (
+                        <button
+                          type="button"
+                          onClick={() => setNewCatVotingEnd('')}
+                          className="text-[10px] font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                        >
+                          Kosongkan
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="datetime-local"
-                      value={newCatVotingEnd}
+                      value={toDateTimeLocalValue(newCatVotingEnd)}
                       onChange={(e) => setNewCatVotingEnd(e.target.value)}
-                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                      className="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
                     />
+                    {formatScheduleDateTime(newCatVotingEnd) && (
+                      <p className="mt-1.5 text-[10px] font-medium text-rose-700 flex items-center gap-1">
+                        <Calendar className="w-3 h-3 shrink-0" />
+                        <span>{formatScheduleDateTime(newCatVotingEnd)}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400">
@@ -4842,53 +5167,96 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </div>
 
               {/* Jadwal Waktu Buka & Tutup Vote Publik (Tersimpan di Sheet Categories) */}
-              <div className="p-3.5 bg-gradient-to-br from-indigo-50/60 to-slate-50 rounded-xl border border-indigo-200/70 space-y-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                    <Clock className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                      <span>Jadwal Waktu Vote Publik (Buka &amp; Tutup)</span>
-                      <span className="text-[10px] font-normal text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Sheet Categories</span>
+              {(() => {
+                const inputStartVal = toDateTimeLocalValue(editingCategory.voting_start);
+                const inputEndVal = toDateTimeLocalValue(editingCategory.voting_end);
+                const currentStartFormatted = formatScheduleDateTime(inputStartVal);
+                const currentEndFormatted = formatScheduleDateTime(inputEndVal);
+
+                return (
+                  <div className="p-3.5 bg-gradient-to-br from-indigo-50/60 to-slate-50 rounded-xl border border-indigo-200/70 space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <div className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
+                        <Clock className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5 flex-wrap">
+                          <span>Jadwal Waktu Vote Publik (Buka &amp; Tutup)</span>
+                          <span className="text-[10px] font-normal text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">Sheet Categories</span>
+                        </div>
+                        <p className="text-[10px] sm:text-[11px] text-slate-500 leading-snug mt-0.5">
+                          Sebelum waktu dibuka, vote publik terkunci otomatis namun pemilih tetap dapat melihat profil/foto regu untuk menunggu.
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight">
-                      Sebelum waktu dibuka, vote publik terkunci otomatis namun pemilih tetap dapat melihat profil/foto regu untuk menunggu.
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-0.5">
+                      <div className="flex flex-col">
+                        <div className="flex items-center justify-between gap-2 mb-1.5 min-h-[18px]">
+                          <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] whitespace-nowrap">
+                            <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>Waktu Dibuka</span>
+                          </label>
+                          {inputStartVal && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingCategory({ ...editingCategory, voting_start: '' })}
+                              className="text-[10px] font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                            >
+                              Kosongkan
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="datetime-local"
+                          value={inputStartVal}
+                          onChange={(e) => setEditingCategory({ ...editingCategory, voting_start: e.target.value })}
+                          className="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                        />
+                        {currentStartFormatted && (
+                          <p className="mt-1.5 text-[10px] font-medium text-emerald-700 flex items-center gap-1">
+                            <Calendar className="w-3 h-3 shrink-0" />
+                            <span>{currentStartFormatted}</span>
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col">
+                        <div className="flex items-center justify-between gap-2 mb-1.5 min-h-[18px]">
+                          <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] whitespace-nowrap">
+                            <Lock className="w-3 h-3 text-rose-600 shrink-0" />
+                            <span>Waktu Ditutup</span>
+                          </label>
+                          {inputEndVal && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingCategory({ ...editingCategory, voting_end: '' })}
+                              className="text-[10px] font-semibold text-slate-400 hover:text-rose-600 transition-colors cursor-pointer shrink-0"
+                            >
+                              Kosongkan
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="datetime-local"
+                          value={inputEndVal}
+                          onChange={(e) => setEditingCategory({ ...editingCategory, voting_end: e.target.value })}
+                          className="w-full px-2.5 py-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
+                        />
+                        {currentEndFormatted && (
+                          <p className="mt-1.5 text-[10px] font-medium text-rose-700 flex items-center gap-1">
+                            <Calendar className="w-3 h-3 shrink-0" />
+                            <span>{currentEndFormatted}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      * Data tersimpan langsung di database Google Sheets (Sheet Categories kolom N &amp; O).
                     </p>
                   </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div>
-                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
-                      <Clock className="w-3 h-3 text-emerald-600" />
-                      <span>Waktu Dibuka (Mulai Vote)</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={editingCategory.voting_start || ''}
-                      onChange={(e) => setEditingCategory({ ...editingCategory, voting_start: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="flex items-center gap-1 font-bold text-slate-700 text-[11px] mb-1">
-                      <Lock className="w-3 h-3 text-rose-600" />
-                      <span>Waktu Ditutup (Selesai Vote)</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={editingCategory.voting_end || ''}
-                      onChange={(e) => setEditingCategory({ ...editingCategory, voting_end: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-slate-300 bg-white font-mono text-xs text-slate-800"
-                    />
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400">
-                  * Data tersimpan langsung di database Google Sheets (Sheet Categories kolom N &amp; O).
-                </p>
-              </div>
+                );
+              })()}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
